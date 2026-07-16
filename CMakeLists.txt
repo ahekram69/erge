@@ -38,6 +38,7 @@ set_target_properties(UsbCameraControl PROPERTIES
 )
 
 if(WIN32)
+    target_compile_definitions(UsbCameraControl PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
     target_link_libraries(UsbCameraControl PRIVATE strmiids ole32 oleaut32)
     install(TARGETS UsbCameraControl RUNTIME DESTINATION .)
 else()
