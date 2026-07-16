@@ -1,8 +1,10 @@
 #include "MainWindow.h"
+#include "NativeCameraControls.h"
 
 #include <QApplication>
 #include <QCamera>
 #include <QCameraFormat>
+#include <QCheckBox>
 #include <QPermissions>
 #include <QComboBox>
 #include <QFrame>
@@ -28,6 +30,7 @@ constexpr int SliderScale = 100;
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
 {
+    m_nativeControls = createNativeCameraControls();
     buildUi();
     connect(&m_mediaDevices, &QMediaDevices::videoInputsChanged,
             this, &MainWindow::refreshDevices);
@@ -134,6 +137,12 @@ void MainWindow::buildUi()
     addSlider(tr("曝光补偿"), m_exposureSlider, m_exposureValue);
     addSlider(tr("变焦"), m_zoomSlider, m_zoomValue);
     panelLayout->addWidget(imageGroup);
+
+    auto *nativeGroup = new QGroupBox(tr("Windows UVC 参数"), panel);
+    m_nativeControlsLayout = new QVBoxLayout(nativeGroup);
+    m_nativeControlsLayout->addWidget(new QLabel(tr("选择摄像头后读取硬件参数"), nativeGroup));
+    nativeGroup->setVisible(static_cast<bool>(m_nativeControls));
+    panelLayout->addWidget(nativeGroup);
     panelLayout->addStretch();
 
     m_statusLabel = new QLabel(tr("正在查找摄像头…"), panel);
@@ -215,6 +224,10 @@ void MainWindow::openCamera(const QCameraDevice &device)
     connect(m_camera.get(), &QCamera::errorOccurred, this, &MainWindow::showCameraError);
 
     populateFormats(device);
+    if (m_nativeControls) {
+        m_nativeControls->open(device.description());
+        rebuildNativeControls();
+    }
     syncControls();
     m_statusLabel->setText(tr("已选择：%1").arg(device.description()));
     m_camera->start();
@@ -222,6 +235,65 @@ void MainWindow::openCamera(const QCameraDevice &device)
         if (m_camera && m_camera->isActive() && !m_receivedFrame)
             m_statusLabel->setText(tr("摄像头已启动，但尚未收到画面。请使用“自动（推荐）”格式。"));
     });
+}
+
+void MainWindow::rebuildNativeControls()
+{
+    if (!m_nativeControlsLayout || !m_nativeControls)
+        return;
+
+    while (QLayoutItem *item = m_nativeControlsLayout->takeAt(0)) {
+        delete item->widget();
+        delete item;
+    }
+
+    const auto controls = m_nativeControls->controls();
+    if (controls.isEmpty()) {
+        auto *message = new QLabel(m_nativeControls->errorString(), this);
+        message->setWordWrap(true);
+        m_nativeControlsLayout->addWidget(message);
+        return;
+    }
+
+    for (const auto &control : controls) {
+        auto *container = new QWidget(this);
+        auto *layout = new QVBoxLayout(container);
+        layout->setContentsMargins(0, 2, 0, 2);
+
+        auto *titleRow = new QHBoxLayout;
+        auto *title = new QLabel(control.name, container);
+        auto *valueLabel = new QLabel(QString::number(control.value), container);
+        auto *autoBox = new QCheckBox(tr("自动"), container);
+        autoBox->setVisible(control.autoSupported);
+        autoBox->setChecked(control.automatic);
+        titleRow->addWidget(title);
+        titleRow->addStretch();
+        titleRow->addWidget(valueLabel);
+        titleRow->addWidget(autoBox);
+
+        auto *slider = new QSlider(Qt::Horizontal, container);
+        slider->setRange(static_cast<int>(control.minimum),
+                         static_cast<int>(control.maximum));
+        slider->setSingleStep(static_cast<int>(control.step));
+        slider->setPageStep(static_cast<int>(control.step));
+        slider->setValue(static_cast<int>(control.value));
+        slider->setEnabled(!control.automatic);
+
+        connect(slider, &QSlider::valueChanged, this,
+                [this, id = control.id, valueLabel](int value) {
+                    if (m_nativeControls->setValue(id, value))
+                        valueLabel->setText(QString::number(value));
+                });
+        connect(autoBox, &QCheckBox::toggled, this,
+                [this, id = control.id, slider](bool enabled) {
+                    if (m_nativeControls->setAutomatic(id, enabled))
+                        slider->setEnabled(!enabled);
+                });
+
+        layout->addLayout(titleRow);
+        layout->addWidget(slider);
+        m_nativeControlsLayout->addWidget(container);
+    }
 }
 
 void MainWindow::populateFormats(const QCameraDevice &device)

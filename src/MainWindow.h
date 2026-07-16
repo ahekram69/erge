@@ -13,6 +13,8 @@ class QLabel;
 class QPushButton;
 class QSlider;
 class QVideoWidget;
+class QVBoxLayout;
+class NativeCameraControls;
 
 class MainWindow final : public QMainWindow
 {
@@ -35,12 +37,14 @@ private:
     void requestCameraPermission();
     void openCamera(const QCameraDevice &device);
     void populateFormats(const QCameraDevice &device);
+    void rebuildNativeControls();
     void syncControls();
     QString formatLabel(const QCameraFormat &format) const;
 
     QMediaDevices m_mediaDevices;
     QMediaCaptureSession m_captureSession;
     std::unique_ptr<QCamera> m_camera;
+    std::unique_ptr<NativeCameraControls> m_nativeControls;
 
     QVideoWidget *m_videoWidget = nullptr;
     QComboBox *m_deviceCombo = nullptr;
@@ -51,5 +55,6 @@ private:
     QLabel *m_exposureValue = nullptr;
     QSlider *m_zoomSlider = nullptr;
     QLabel *m_zoomValue = nullptr;
+    QVBoxLayout *m_nativeControlsLayout = nullptr;
     bool m_receivedFrame = false;
 };

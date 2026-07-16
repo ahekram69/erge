@@ -12,7 +12,14 @@ qt_add_executable(UsbCameraControl WIN32 MACOSX_BUNDLE
     src/main.cpp
     src/MainWindow.cpp
     src/MainWindow.h
+    src/NativeCameraControls.h
 )
+
+if(WIN32)
+    target_sources(UsbCameraControl PRIVATE src/NativeCameraControls_windows.cpp)
+else()
+    target_sources(UsbCameraControl PRIVATE src/NativeCameraControls_stub.cpp)
+endif()
 
 target_link_libraries(UsbCameraControl PRIVATE
     Qt6::Core
@@ -31,6 +38,7 @@ set_target_properties(UsbCameraControl PROPERTIES
 )
 
 if(WIN32)
+    target_link_libraries(UsbCameraControl PRIVATE strmiids ole32 oleaut32)
     install(TARGETS UsbCameraControl RUNTIME DESTINATION .)
 else()
     install(TARGETS UsbCameraControl BUNDLE DESTINATION .)
