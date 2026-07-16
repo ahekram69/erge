@@ -1,0 +1,29 @@
+mixed-port: 7890
+allow-lan: false
+mode: rule
+log-level: info
+
+proxies:
+  - name: USA-888-xywx5fnnvl
+    type: vless
+    server: 192.220.13.143
+    port: 443
+    uuid: 04b65f84-952b-4aea-bb48-bd0429625a75
+    network: tcp
+    udp: true
+    tls: true
+    flow: xtls-rprx-vision
+    servername: blog.api.www.cloudflare.com
+    client-fingerprint: chrome
+    reality-opts:
+      public-key: AmTSFd4962BxjQ144WEa8JbwWJt6kg5MwDKp3yhojGM
+      short-id: 6b
+
+proxy-groups:
+  - name: Proxy
+    type: select
+    proxies:
+      - USA-888-xywx5fnnvl
+
+rules:
+  - MATCH,Proxy
