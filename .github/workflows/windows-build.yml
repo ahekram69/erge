@@ -1,0 +1,50 @@
+name: Windows Build
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - "agent/**"
+  pull_request:
+
+jobs:
+  build-windows:
+    runs-on: windows-2022
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: "6.8.3"
+          arch: win64_msvc2022_64
+          modules: qtmultimedia
+          cache: true
+
+      - name: Configure
+        run: cmake -S . -B build -A x64 -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: Deploy Qt runtime
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path package | Out-Null
+          Copy-Item build/Release/UsbCameraControl.exe package/
+          windeployqt --release --no-translations --compiler-runtime package/UsbCameraControl.exe
+
+      - name: Create test package
+        shell: pwsh
+        run: Compress-Archive -Path package/* -DestinationPath UsbCameraControl-Windows.zip
+
+      - name: Upload Windows test build
+        uses: actions/upload-artifact@v4
+        with:
+          name: UsbCameraControl-Windows
+          path: UsbCameraControl-Windows.zip
+          if-no-files-found: error
+          retention-days: 14
