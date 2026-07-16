@@ -38,6 +38,10 @@ private:
     void openCamera(const QCameraDevice &device);
     void populateFormats(const QCameraDevice &device);
     void rebuildNativeControls();
+    void saveNativePreset();
+    void loadNativePreset();
+    void resetNativeControls();
+    QString presetGroup() const;
     void syncControls();
     QString formatLabel(const QCameraFormat &format) const;
 
@@ -56,5 +60,6 @@ private:
     QSlider *m_zoomSlider = nullptr;
     QLabel *m_zoomValue = nullptr;
     QVBoxLayout *m_nativeControlsLayout = nullptr;
+    QString m_currentDeviceName;
     bool m_receivedFrame = false;
 };

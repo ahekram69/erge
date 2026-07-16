@@ -14,6 +14,7 @@
 #include <QMessageBox>
 #include <QPushButton>
 #include <QScrollArea>
+#include <QSettings>
 #include <QSlider>
 #include <QStatusBar>
 #include <QTimer>
@@ -26,6 +27,16 @@
 
 namespace {
 constexpr int SliderScale = 100;
+
+void clearLayout(QLayout *layout)
+{
+    while (QLayoutItem *item = layout->takeAt(0)) {
+        if (QLayout *childLayout = item->layout())
+            clearLayout(childLayout);
+        delete item->widget();
+        delete item;
+    }
+}
 }
 
 MainWindow::MainWindow(QWidget *parent)
@@ -225,6 +236,7 @@ void MainWindow::openCamera(const QCameraDevice &device)
         m_camera->stop();
 
     m_camera = std::make_unique<QCamera>(device);
+    m_currentDeviceName = device.description();
     m_receivedFrame = false;
     m_captureSession.setCamera(m_camera.get());
     m_captureSession.setVideoOutput(m_videoWidget);
@@ -250,10 +262,7 @@ void MainWindow::rebuildNativeControls()
     if (!m_nativeControlsLayout || !m_nativeControls)
         return;
 
-    while (QLayoutItem *item = m_nativeControlsLayout->takeAt(0)) {
-        delete item->widget();
-        delete item;
-    }
+    clearLayout(m_nativeControlsLayout);
 
     const auto controls = m_nativeControls->controls();
     if (controls.isEmpty()) {
@@ -262,6 +271,18 @@ void MainWindow::rebuildNativeControls()
         m_nativeControlsLayout->addWidget(message);
         return;
     }
+
+    auto *buttonRow = new QHBoxLayout;
+    auto *saveButton = new QPushButton(tr("保存预设"), this);
+    auto *loadButton = new QPushButton(tr("加载预设"), this);
+    auto *resetButton = new QPushButton(tr("恢复默认"), this);
+    buttonRow->addWidget(saveButton);
+    buttonRow->addWidget(loadButton);
+    buttonRow->addWidget(resetButton);
+    m_nativeControlsLayout->addLayout(buttonRow);
+    connect(saveButton, &QPushButton::clicked, this, &MainWindow::saveNativePreset);
+    connect(loadButton, &QPushButton::clicked, this, &MainWindow::loadNativePreset);
+    connect(resetButton, &QPushButton::clicked, this, &MainWindow::resetNativeControls);
 
     for (const auto &control : controls) {
         auto *container = new QWidget(this);
@@ -302,6 +323,80 @@ void MainWindow::rebuildNativeControls()
         layout->addWidget(slider);
         m_nativeControlsLayout->addWidget(container);
     }
+}
+
+QString MainWindow::presetGroup() const
+{
+    const QByteArray encoded = m_currentDeviceName.toUtf8().toBase64(
+        QByteArray::Base64UrlEncoding | QByteArray::OmitTrailingEquals);
+    return QStringLiteral("cameraPresets/%1").arg(QString::fromLatin1(encoded));
+}
+
+void MainWindow::saveNativePreset()
+{
+    if (!m_nativeControls || m_currentDeviceName.isEmpty())
+        return;
+
+    QSettings settings;
+    settings.beginGroup(presetGroup());
+    settings.remove(QString());
+    settings.setValue(QStringLiteral("deviceName"), m_currentDeviceName);
+    for (const auto &control : m_nativeControls->controls()) {
+        const QString key = QString::number(static_cast<int>(control.id));
+        settings.setValue(key + QStringLiteral("/value"),
+                          static_cast<qlonglong>(control.value));
+        settings.setValue(key + QStringLiteral("/automatic"), control.automatic);
+    }
+    settings.endGroup();
+    settings.sync();
+    m_statusLabel->setText(tr("已保存“%1”的参数预设").arg(m_currentDeviceName));
+}
+
+void MainWindow::loadNativePreset()
+{
+    if (!m_nativeControls || m_currentDeviceName.isEmpty())
+        return;
+
+    QSettings settings;
+    settings.beginGroup(presetGroup());
+    if (!settings.contains(QStringLiteral("deviceName"))) {
+        settings.endGroup();
+        m_statusLabel->setText(tr("当前摄像头还没有保存过预设"));
+        return;
+    }
+
+    int applied = 0;
+    for (const auto &control : m_nativeControls->controls()) {
+        const QString key = QString::number(static_cast<int>(control.id));
+        const QString valueKey = key + QStringLiteral("/value");
+        if (!settings.contains(valueKey))
+            continue;
+        const long value = settings.value(valueKey).toLongLong();
+        const bool automatic = settings.value(key + QStringLiteral("/automatic"), false).toBool();
+        m_nativeControls->setAutomatic(control.id, false);
+        if (m_nativeControls->setValue(control.id, value))
+            ++applied;
+        if (control.autoSupported && automatic)
+            m_nativeControls->setAutomatic(control.id, true);
+    }
+    settings.endGroup();
+    rebuildNativeControls();
+    m_statusLabel->setText(tr("已加载预设，共应用 %1 项参数").arg(applied));
+}
+
+void MainWindow::resetNativeControls()
+{
+    if (!m_nativeControls)
+        return;
+
+    int applied = 0;
+    for (const auto &control : m_nativeControls->controls()) {
+        m_nativeControls->setAutomatic(control.id, false);
+        if (m_nativeControls->setValue(control.id, control.defaultValue))
+            ++applied;
+    }
+    rebuildNativeControls();
+    m_statusLabel->setText(tr("已恢复硬件默认值，共重置 %1 项参数").arg(applied));
 }
 
 void MainWindow::populateFormats(const QCameraDevice &device)

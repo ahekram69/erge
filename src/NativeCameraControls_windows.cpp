@@ -119,11 +119,18 @@ public:
         const Mapping *mapping = findMapping(id);
         if (!mapping)
             return false;
+        bool succeeded = false;
         if (mapping->kind == InterfaceKind::VideoProcAmp && m_videoProcAmp)
-            return SUCCEEDED(m_videoProcAmp->Set(mapping->property, value, VideoProcAmp_Flags_Manual));
+            succeeded = SUCCEEDED(m_videoProcAmp->Set(mapping->property, value, VideoProcAmp_Flags_Manual));
         if (mapping->kind == InterfaceKind::CameraControl && m_cameraControl)
-            return SUCCEEDED(m_cameraControl->Set(mapping->property, value, CameraControl_Flags_Manual));
-        return false;
+            succeeded = SUCCEEDED(m_cameraControl->Set(mapping->property, value, CameraControl_Flags_Manual));
+        if (succeeded) {
+            if (Control *control = findMutableControl(id)) {
+                control->value = value;
+                control->automatic = false;
+            }
+        }
+        return succeeded;
     }
 
     bool setAutomatic(Id id, bool enabled) override
@@ -135,15 +142,20 @@ public:
         if (!control)
             return false;
         const long value = control->value;
+        bool succeeded = false;
         if (mapping->kind == InterfaceKind::VideoProcAmp && m_videoProcAmp) {
             const long flags = enabled ? VideoProcAmp_Flags_Auto : VideoProcAmp_Flags_Manual;
-            return SUCCEEDED(m_videoProcAmp->Set(mapping->property, value, flags));
+            succeeded = SUCCEEDED(m_videoProcAmp->Set(mapping->property, value, flags));
         }
         if (mapping->kind == InterfaceKind::CameraControl && m_cameraControl) {
             const long flags = enabled ? CameraControl_Flags_Auto : CameraControl_Flags_Manual;
-            return SUCCEEDED(m_cameraControl->Set(mapping->property, value, flags));
+            succeeded = SUCCEEDED(m_cameraControl->Set(mapping->property, value, flags));
         }
-        return false;
+        if (succeeded) {
+            if (Control *control = findMutableControl(id))
+                control->automatic = enabled;
+        }
+        return succeeded;
     }
 
     QString errorString() const override { return m_error; }
@@ -160,6 +172,13 @@ private:
         const auto it = std::find_if(m_controls.cbegin(), m_controls.cend(),
                                      [id](const Control &control) { return control.id == id; });
         return it == m_controls.cend() ? nullptr : &*it;
+    }
+
+    Control *findMutableControl(Id id)
+    {
+        const auto it = std::find_if(m_controls.begin(), m_controls.end(),
+                                     [id](const Control &control) { return control.id == id; });
+        return it == m_controls.end() ? nullptr : &*it;
     }
 
     void queryControls()
