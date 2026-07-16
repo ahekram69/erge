@@ -13,6 +13,7 @@
 #include <QLabel>
 #include <QMessageBox>
 #include <QPushButton>
+#include <QScrollArea>
 #include <QSlider>
 #include <QStatusBar>
 #include <QTimer>
@@ -148,7 +149,14 @@ void MainWindow::buildUi()
     m_statusLabel = new QLabel(tr("正在查找摄像头…"), panel);
     m_statusLabel->setWordWrap(true);
     panelLayout->addWidget(m_statusLabel);
-    root->addWidget(panel);
+    auto *scrollArea = new QScrollArea(central);
+    scrollArea->setWidgetResizable(true);
+    scrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    scrollArea->setFrameShape(QFrame::NoFrame);
+    scrollArea->setMinimumWidth(340);
+    scrollArea->setMaximumWidth(410);
+    scrollArea->setWidget(panel);
+    root->addWidget(scrollArea);
     setCentralWidget(central);
 
     connect(refreshButton, &QPushButton::clicked, this, &MainWindow::refreshDevices);
