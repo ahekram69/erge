@@ -1,5 +1,6 @@
 #include "MainWindow.h"
 #include "NativeCameraControls.h"
+#include "VideoPreviewWidget.h"
 
 #include <QApplication>
 #include <QCamera>
@@ -7,21 +8,25 @@
 #include <QCheckBox>
 #include <QPermissions>
 #include <QComboBox>
+#include <QDateTime>
+#include <QDir>
 #include <QFrame>
 #include <QGroupBox>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QMessageBox>
+#include <QMediaRecorder>
 #include <QPushButton>
 #include <QScrollArea>
 #include <QSettings>
 #include <QSlider>
 #include <QStatusBar>
+#include <QStandardPaths>
 #include <QTimer>
 #include <QVBoxLayout>
 #include <QVideoFrame>
 #include <QVideoSink>
-#include <QVideoWidget>
+#include <QUrl>
 
 #include <algorithm>
 
@@ -43,6 +48,8 @@ MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
 {
     m_nativeControls = createNativeCameraControls();
+    m_recorder = std::make_unique<QMediaRecorder>();
+    m_captureSession.setRecorder(m_recorder.get());
     buildUi();
     connect(&m_mediaDevices, &QMediaDevices::videoInputsChanged,
             this, &MainWindow::refreshDevices);
@@ -95,9 +102,7 @@ void MainWindow::buildUi()
     root->setContentsMargins(12, 12, 12, 12);
     root->setSpacing(12);
 
-    m_videoWidget = new QVideoWidget(central);
-    m_videoWidget->setMinimumSize(720, 480);
-    m_videoWidget->setStyleSheet("background: #111; border-radius: 6px;");
+    m_videoWidget = new VideoPreviewWidget(central);
     connect(m_videoWidget->videoSink(), &QVideoSink::videoFrameChanged,
             this, [this](const QVideoFrame &frame) {
                 if (!frame.isValid())
@@ -131,6 +136,28 @@ void MainWindow::buildUi()
     buttonRow->addWidget(m_startButton);
     deviceLayout->addLayout(buttonRow);
     panelLayout->addWidget(deviceGroup);
+
+    auto *captureGroup = new QGroupBox(tr("截图与画面"), panel);
+    auto *captureLayout = new QVBoxLayout(captureGroup);
+    auto *captureButtons = new QHBoxLayout;
+    m_snapshotButton = new QPushButton(tr("截图"), captureGroup);
+    m_recordButton = new QPushButton(tr("开始录像"), captureGroup);
+    captureButtons->addWidget(m_snapshotButton);
+    captureButtons->addWidget(m_recordButton);
+    captureLayout->addLayout(captureButtons);
+
+    auto *mirrorCheck = new QCheckBox(tr("左右镜像"), captureGroup);
+    auto *verticalCheck = new QCheckBox(tr("上下翻转"), captureGroup);
+    auto *rotationCombo = new QComboBox(captureGroup);
+    rotationCombo->addItem(tr("不旋转"), 0);
+    rotationCombo->addItem(tr("顺时针 90°"), 90);
+    rotationCombo->addItem(tr("旋转 180°"), 180);
+    rotationCombo->addItem(tr("顺时针 270°"), 270);
+    captureLayout->addWidget(mirrorCheck);
+    captureLayout->addWidget(verticalCheck);
+    captureLayout->addWidget(new QLabel(tr("画面旋转"), captureGroup));
+    captureLayout->addWidget(rotationCombo);
+    panelLayout->addWidget(captureGroup);
 
     auto *imageGroup = new QGroupBox(tr("画面参数"), panel);
     auto *imageLayout = new QVBoxLayout(imageGroup);
@@ -174,6 +201,19 @@ void MainWindow::buildUi()
     connect(m_deviceCombo, &QComboBox::currentIndexChanged, this, &MainWindow::selectCamera);
     connect(m_formatCombo, &QComboBox::currentIndexChanged, this, &MainWindow::selectFormat);
     connect(m_startButton, &QPushButton::clicked, this, &MainWindow::toggleCamera);
+    connect(m_snapshotButton, &QPushButton::clicked, this, &MainWindow::takeSnapshot);
+    connect(m_recordButton, &QPushButton::clicked, this, &MainWindow::toggleRecording);
+    connect(mirrorCheck, &QCheckBox::toggled, m_videoWidget, &VideoPreviewWidget::setMirrored);
+    connect(verticalCheck, &QCheckBox::toggled, m_videoWidget,
+            &VideoPreviewWidget::setFlippedVertically);
+    connect(rotationCombo, &QComboBox::currentIndexChanged, this,
+            [this, rotationCombo](int index) {
+                m_videoWidget->setRotation(rotationCombo->itemData(index).toInt());
+            });
+    connect(m_recorder.get(), &QMediaRecorder::recorderStateChanged,
+            this, &MainWindow::updateRecorderState);
+    connect(m_recorder.get(), &QMediaRecorder::errorOccurred,
+            this, &MainWindow::showRecorderError);
 
     connect(m_exposureSlider, &QSlider::valueChanged, this, [this](int value) {
         if (!m_camera)
@@ -239,7 +279,7 @@ void MainWindow::openCamera(const QCameraDevice &device)
     m_currentDeviceName = device.description();
     m_receivedFrame = false;
     m_captureSession.setCamera(m_camera.get());
-    m_captureSession.setVideoOutput(m_videoWidget);
+    m_captureSession.setVideoSink(m_videoWidget->videoSink());
     connect(m_camera.get(), &QCamera::activeChanged, this, &MainWindow::updateCameraState);
     connect(m_camera.get(), &QCamera::errorOccurred, this, &MainWindow::showCameraError);
 
@@ -448,6 +488,8 @@ void MainWindow::toggleCamera()
 {
     if (!m_camera)
         return;
+    if (m_camera->isActive() && m_recorder->recorderState() == QMediaRecorder::RecordingState)
+        m_recorder->stop();
     m_camera->isActive() ? m_camera->stop() : m_camera->start();
 }
 
@@ -464,6 +506,77 @@ void MainWindow::showCameraError()
     if (!m_camera || m_camera->error() == QCamera::NoError)
         return;
     m_statusLabel->setText(tr("摄像头错误：%1").arg(m_camera->errorString()));
+}
+
+void MainWindow::takeSnapshot()
+{
+    const QImage image = m_videoWidget->currentImage();
+    if (image.isNull()) {
+        m_statusLabel->setText(tr("截图失败：当前还没有可用画面"));
+        return;
+    }
+
+    const QString pictures = QStandardPaths::writableLocation(QStandardPaths::PicturesLocation);
+    QDir directory(pictures + QStringLiteral("/USB Camera Control"));
+    if (!directory.exists() && !directory.mkpath(QStringLiteral("."))) {
+        m_statusLabel->setText(tr("截图失败：无法创建图片保存目录"));
+        return;
+    }
+
+    const QString fileName = QStringLiteral("截图_%1.png")
+        .arg(QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd_HHmmss_zzz")));
+    const QString path = directory.filePath(fileName);
+    if (image.save(path, "PNG"))
+        m_statusLabel->setText(tr("截图已保存：%1").arg(QDir::toNativeSeparators(path)));
+    else
+        m_statusLabel->setText(tr("截图失败：无法写入文件"));
+}
+
+void MainWindow::toggleRecording()
+{
+    if (m_recorder->recorderState() == QMediaRecorder::RecordingState) {
+        m_recorder->stop();
+        return;
+    }
+    if (!m_camera) {
+        m_statusLabel->setText(tr("录像失败：未选择摄像头"));
+        return;
+    }
+    if (!m_camera->isActive())
+        m_camera->start();
+
+    const QString movies = QStandardPaths::writableLocation(QStandardPaths::MoviesLocation);
+    QDir directory(movies + QStringLiteral("/USB Camera Control"));
+    if (!directory.exists() && !directory.mkpath(QStringLiteral("."))) {
+        m_statusLabel->setText(tr("录像失败：无法创建视频保存目录"));
+        return;
+    }
+
+    const QString fileName = QStringLiteral("录像_%1.mp4")
+        .arg(QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd_HHmmss")));
+    m_recorder->setOutputLocation(QUrl::fromLocalFile(directory.filePath(fileName)));
+    m_recorder->setQuality(QMediaRecorder::HighQuality);
+    m_recorder->record();
+}
+
+void MainWindow::updateRecorderState()
+{
+    const bool recording = m_recorder->recorderState() == QMediaRecorder::RecordingState;
+    m_recordButton->setText(recording ? tr("停止录像") : tr("开始录像"));
+    if (recording) {
+        m_statusLabel->setText(tr("正在录像…"));
+    } else if (!m_recorder->actualLocation().isEmpty()) {
+        m_statusLabel->setText(tr("录像已保存：%1")
+                                   .arg(QDir::toNativeSeparators(
+                                       m_recorder->actualLocation().toLocalFile())));
+    }
+}
+
+void MainWindow::showRecorderError()
+{
+    if (m_recorder->error() == QMediaRecorder::NoError)
+        return;
+    m_statusLabel->setText(tr("录像错误：%1").arg(m_recorder->errorString()));
 }
 
 void MainWindow::syncControls()

@@ -13,6 +13,8 @@ qt_add_executable(UsbCameraControl WIN32 MACOSX_BUNDLE
     src/MainWindow.cpp
     src/MainWindow.h
     src/NativeCameraControls.h
+    src/VideoPreviewWidget.cpp
+    src/VideoPreviewWidget.h
 )
 
 if(WIN32)

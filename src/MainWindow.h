@@ -12,9 +12,10 @@ class QComboBox;
 class QLabel;
 class QPushButton;
 class QSlider;
-class QVideoWidget;
 class QVBoxLayout;
 class NativeCameraControls;
+class QMediaRecorder;
+class VideoPreviewWidget;
 
 class MainWindow final : public QMainWindow
 {
@@ -31,6 +32,10 @@ private slots:
     void toggleCamera();
     void updateCameraState();
     void showCameraError();
+    void takeSnapshot();
+    void toggleRecording();
+    void updateRecorderState();
+    void showRecorderError();
 
 private:
     void buildUi();
@@ -49,11 +54,14 @@ private:
     QMediaCaptureSession m_captureSession;
     std::unique_ptr<QCamera> m_camera;
     std::unique_ptr<NativeCameraControls> m_nativeControls;
+    std::unique_ptr<QMediaRecorder> m_recorder;
 
-    QVideoWidget *m_videoWidget = nullptr;
+    VideoPreviewWidget *m_videoWidget = nullptr;
     QComboBox *m_deviceCombo = nullptr;
     QComboBox *m_formatCombo = nullptr;
     QPushButton *m_startButton = nullptr;
+    QPushButton *m_snapshotButton = nullptr;
+    QPushButton *m_recordButton = nullptr;
     QLabel *m_statusLabel = nullptr;
     QSlider *m_exposureSlider = nullptr;
     QLabel *m_exposureValue = nullptr;
