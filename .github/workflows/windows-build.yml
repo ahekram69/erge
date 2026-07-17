@@ -1,7 +1,7 @@
 name: Windows Build
 
 env:
-  APP_VERSION: "0.6.0"
+  APP_VERSION: "0.6.1"
 
 on:
   workflow_dispatch:
@@ -57,6 +57,7 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path installer-output | Out-Null
+          Invoke-WebRequest -Uri "https://raw.githubusercontent.com/jrsoftware/issrc/main/Files/Languages/ChineseSimplified.isl" -OutFile "installer/windows/ChineseSimplified.isl"
           & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DMyAppVersion=$env:APP_VERSION" installer/windows/USB-Camera-Control.iss
 
       - name: Upload Windows installer
