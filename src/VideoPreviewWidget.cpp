@@ -21,7 +21,8 @@ VideoPreviewWidget::VideoPreviewWidget(QWidget *parent)
 
     m_view = new QGraphicsView(m_scene, this);
     m_view->setFrameShape(QFrame::NoFrame);
-    m_view->setStyleSheet(QStringLiteral("background: #111; border-radius: 6px;"));
+    m_view->setStyleSheet(QStringLiteral(
+        "background: #e9ebef; border: 1px solid #d2d2d7; border-radius: 12px;"));
     m_view->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     m_view->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     m_view->setAlignment(Qt::AlignCenter);

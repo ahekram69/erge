@@ -23,6 +23,7 @@
 #include <QStatusBar>
 #include <QStandardPaths>
 #include <QStyle>
+#include <QTabWidget>
 #include <QTimer>
 #include <QVBoxLayout>
 #include <QVideoFrame>
@@ -148,9 +149,12 @@ void MainWindow::buildUi()
     content->addWidget(m_videoWidget, 1);
 
     auto *panel = new QFrame(central);
+    panel->setObjectName(QStringLiteral("sidePanel"));
     panel->setMinimumWidth(320);
     panel->setMaximumWidth(390);
     auto *panelLayout = new QVBoxLayout(panel);
+    panelLayout->setContentsMargins(0, 0, 0, 0);
+    panelLayout->setSpacing(10);
 
     auto *deviceGroup = new QGroupBox(tr("摄像头"), panel);
     auto *deviceLayout = new QVBoxLayout(deviceGroup);
@@ -169,7 +173,26 @@ void MainWindow::buildUi()
     deviceLayout->addLayout(buttonRow);
     panelLayout->addWidget(deviceGroup);
 
-    auto *captureGroup = new QGroupBox(tr("截图与画面"), panel);
+    auto *tabs = new QTabWidget(panel);
+    tabs->setObjectName(QStringLiteral("controlTabs"));
+
+    auto *parameterPage = new QWidget(tabs);
+    auto *parameterPageLayout = new QVBoxLayout(parameterPage);
+    parameterPageLayout->setContentsMargins(0, 8, 0, 0);
+    auto *parameterScroll = new QScrollArea(parameterPage);
+    parameterScroll->setWidgetResizable(true);
+    parameterScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    parameterScroll->setFrameShape(QFrame::NoFrame);
+    auto *parameterContent = new QWidget(parameterScroll);
+    auto *parameterLayout = new QVBoxLayout(parameterContent);
+    parameterLayout->setContentsMargins(0, 0, 4, 0);
+    parameterLayout->setSpacing(8);
+
+    auto *capturePage = new QWidget(tabs);
+    auto *capturePageLayout = new QVBoxLayout(capturePage);
+    capturePageLayout->setContentsMargins(0, 8, 0, 0);
+
+    auto *captureGroup = new QGroupBox(tr("拍摄与画面"), capturePage);
     auto *captureLayout = new QVBoxLayout(captureGroup);
     auto *captureButtons = new QHBoxLayout;
     m_snapshotButton = new QPushButton(tr("截图"), captureGroup);
@@ -190,9 +213,10 @@ void MainWindow::buildUi()
     captureLayout->addWidget(m_verticalCheck);
     captureLayout->addWidget(new QLabel(tr("画面旋转"), captureGroup));
     captureLayout->addWidget(m_rotationCombo);
-    panelLayout->addWidget(captureGroup);
+    capturePageLayout->addWidget(captureGroup);
+    capturePageLayout->addStretch();
 
-    auto *imageGroup = new QGroupBox(tr("画面参数"), panel);
+    auto *imageGroup = new QGroupBox(tr("基础参数"), parameterContent);
     auto *imageLayout = new QVBoxLayout(imageGroup);
 
     auto addSlider = [&](const QString &name, QSlider *&slider, QLabel *&value) {
@@ -208,27 +232,26 @@ void MainWindow::buildUi()
 
     addSlider(tr("曝光补偿"), m_exposureSlider, m_exposureValue);
     addSlider(tr("变焦"), m_zoomSlider, m_zoomValue);
-    panelLayout->addWidget(imageGroup);
+    parameterLayout->addWidget(imageGroup);
 
-    auto *nativeGroup = new QGroupBox(tr("Windows UVC 参数"), panel);
+    auto *nativeGroup = new QGroupBox(tr("摄像头参数"), parameterContent);
     m_nativeControlsLayout = new QVBoxLayout(nativeGroup);
     m_nativeControlsLayout->addWidget(new QLabel(tr("选择摄像头后读取硬件参数"), nativeGroup));
     nativeGroup->setVisible(static_cast<bool>(m_nativeControls));
-    panelLayout->addWidget(nativeGroup);
-    panelLayout->addStretch();
+    parameterLayout->addWidget(nativeGroup);
+    parameterLayout->addStretch();
+    parameterScroll->setWidget(parameterContent);
+    parameterPageLayout->addWidget(parameterScroll);
+
+    tabs->addTab(parameterPage, tr("参数设置"));
+    tabs->addTab(capturePage, tr("拍摄与画面"));
+    panelLayout->addWidget(tabs, 1);
 
     m_statusLabel = new QLabel(tr("正在查找摄像头…"), panel);
     m_statusLabel->setObjectName(QStringLiteral("statusCard"));
     m_statusLabel->setWordWrap(true);
     panelLayout->addWidget(m_statusLabel);
-    auto *scrollArea = new QScrollArea(central);
-    scrollArea->setWidgetResizable(true);
-    scrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    scrollArea->setFrameShape(QFrame::NoFrame);
-    scrollArea->setMinimumWidth(340);
-    scrollArea->setMaximumWidth(410);
-    scrollArea->setWidget(panel);
-    content->addWidget(scrollArea);
+    content->addWidget(panel);
     setCentralWidget(central);
 
     connect(refreshButton, &QPushButton::clicked, this, &MainWindow::refreshDevices);
@@ -255,6 +278,9 @@ void MainWindow::buildUi()
             this, &MainWindow::updateRecorderState);
     connect(m_recorder.get(), &QMediaRecorder::errorOccurred,
             this, &MainWindow::showRecorderError);
+    connect(tabs, &QTabWidget::currentChanged, this, [](int index) {
+        QSettings().setValue(QStringLiteral("ui/lastControlTab"), index);
+    });
 
     QSettings settings;
     m_mirrorCheck->setChecked(settings.value(QStringLiteral("preview/mirrored"), false).toBool());
@@ -263,6 +289,7 @@ void MainWindow::buildUi()
     const int savedRotation = settings.value(QStringLiteral("preview/rotation"), 0).toInt();
     const int rotationIndex = m_rotationCombo->findData(savedRotation);
     m_rotationCombo->setCurrentIndex(rotationIndex >= 0 ? rotationIndex : 0);
+    tabs->setCurrentIndex(settings.value(QStringLiteral("ui/lastControlTab"), 0).toInt());
 
     connect(m_exposureSlider, &QSlider::valueChanged, this, [this](int value) {
         if (!m_camera)
