@@ -131,6 +131,17 @@ void MainWindow::buildUi()
     headingColumn->addWidget(appSubtitle);
     headerLayout->addLayout(headingColumn);
     headerLayout->addStretch();
+    auto *languageCombo = new QComboBox(header);
+    languageCombo->setToolTip(tr("选择界面语言（重启后生效）"));
+    languageCombo->addItem(tr("跟随系统"), QStringLiteral("system"));
+    languageCombo->addItem(tr("简体中文"), QStringLiteral("zh_CN"));
+    languageCombo->addItem(QStringLiteral("English"), QStringLiteral("en_US"));
+    languageCombo->setMaximumWidth(140);
+    const QString savedLanguage = QSettings().value(
+        QStringLiteral("ui/language"), QStringLiteral("system")).toString();
+    const int languageIndex = languageCombo->findData(savedLanguage);
+    languageCombo->setCurrentIndex(languageIndex >= 0 ? languageIndex : 0);
+    headerLayout->addWidget(languageCombo);
     m_connectionBadge = new QLabel(tr("●  正在连接"), header);
     m_connectionBadge->setObjectName(QStringLiteral("connectionBadge"));
     m_connectionBadge->setProperty("state", QStringLiteral("waiting"));
@@ -278,6 +289,17 @@ void MainWindow::buildUi()
     connect(m_recordButton, &QPushButton::clicked, this, &MainWindow::toggleRecording);
     connect(picturesFolderButton, &QPushButton::clicked, this, &MainWindow::openPicturesFolder);
     connect(moviesFolderButton, &QPushButton::clicked, this, &MainWindow::openMoviesFolder);
+    connect(languageCombo, &QComboBox::currentIndexChanged, this,
+            [this, languageCombo](int index) {
+                const QString language = languageCombo->itemData(index).toString();
+                QSettings settings;
+                if (settings.value(QStringLiteral("ui/language"), QStringLiteral("system"))
+                        .toString() == language)
+                    return;
+                settings.setValue(QStringLiteral("ui/language"), language);
+                QMessageBox::information(this, tr("语言设置"),
+                                         tr("界面语言将在重新启动软件后生效。"));
+            });
     connect(m_mirrorCheck, &QCheckBox::toggled, this, [this](bool enabled) {
         m_videoWidget->setMirrored(enabled);
         QSettings().setValue(QStringLiteral("preview/mirrored"), enabled);
@@ -469,12 +491,27 @@ void MainWindow::rebuildNativeControls()
     connect(resetButton, &QPushButton::clicked, this, &MainWindow::resetNativeControls);
 
     for (const auto &control : controls) {
+        QString controlName = control.name;
+        switch (control.id) {
+        case NativeCameraControls::Id::Brightness: controlName = tr("亮度"); break;
+        case NativeCameraControls::Id::Contrast: controlName = tr("对比度"); break;
+        case NativeCameraControls::Id::Hue: controlName = tr("色相"); break;
+        case NativeCameraControls::Id::Saturation: controlName = tr("饱和度"); break;
+        case NativeCameraControls::Id::Sharpness: controlName = tr("锐度"); break;
+        case NativeCameraControls::Id::Gamma: controlName = QStringLiteral("Gamma"); break;
+        case NativeCameraControls::Id::WhiteBalance: controlName = tr("白平衡"); break;
+        case NativeCameraControls::Id::BacklightCompensation: controlName = tr("背光补偿"); break;
+        case NativeCameraControls::Id::Gain: controlName = tr("增益"); break;
+        case NativeCameraControls::Id::Zoom: controlName = tr("变焦"); break;
+        case NativeCameraControls::Id::Exposure: controlName = tr("曝光"); break;
+        case NativeCameraControls::Id::Focus: controlName = tr("对焦"); break;
+        }
         auto *container = new QWidget(this);
         auto *layout = new QVBoxLayout(container);
         layout->setContentsMargins(0, 2, 0, 2);
 
         auto *titleRow = new QHBoxLayout;
-        auto *title = new QLabel(control.name, container);
+        auto *title = new QLabel(controlName, container);
         auto *valueInput = new QSpinBox(container);
         valueInput->setRange(static_cast<int>(control.minimum),
                              static_cast<int>(control.maximum));
@@ -503,7 +540,7 @@ void MainWindow::rebuildNativeControls()
         valueInput->setEnabled(!control.automatic);
 
         connect(slider, &QSlider::valueChanged, this,
-                [this, id = control.id, valueInput, name = control.name](int value) {
+                [this, id = control.id, valueInput, name = controlName](int value) {
                     if (m_nativeControls->setValue(id, value)) {
                         const QSignalBlocker blocker(valueInput);
                         valueInput->setValue(value);
@@ -512,7 +549,7 @@ void MainWindow::rebuildNativeControls()
                     }
                 });
         connect(valueInput, &QSpinBox::valueChanged, this,
-                [this, id = control.id, slider, name = control.name](int value) {
+                [this, id = control.id, slider, name = controlName](int value) {
                     if (m_nativeControls->setValue(id, value)) {
                         const QSignalBlocker blocker(slider);
                         slider->setValue(value);
@@ -521,7 +558,7 @@ void MainWindow::rebuildNativeControls()
                     }
                 });
         connect(autoBox, &QCheckBox::toggled, this,
-                [this, id = control.id, slider, valueInput, name = control.name](bool enabled) {
+                [this, id = control.id, slider, valueInput, name = controlName](bool enabled) {
                     if (m_nativeControls->setAutomatic(id, enabled)) {
                         slider->setEnabled(!enabled);
                         valueInput->setEnabled(!enabled);

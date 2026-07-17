@@ -1,7 +1,7 @@
 name: Windows Build
 
 env:
-  APP_VERSION: "0.5.2"
+  APP_VERSION: "0.6.0"
 
 on:
   workflow_dispatch:
@@ -46,5 +46,23 @@ jobs:
         with:
           name: UsbCameraControl-Windows-v${{ env.APP_VERSION }}-build-${{ github.run_number }}
           path: package/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+
+      - name: Build Windows installer
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path installer-output | Out-Null
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DMyAppVersion=$env:APP_VERSION" installer/windows/USB-Camera-Control.iss
+
+      - name: Upload Windows installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: USB-Camera-Control-Setup-v${{ env.APP_VERSION }}-build-${{ github.run_number }}
+          path: installer-output/*.exe
           if-no-files-found: error
           retention-days: 14

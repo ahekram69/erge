@@ -2,7 +2,10 @@
 
 #include <QApplication>
 #include <QCoreApplication>
+#include <QLocale>
+#include <QSettings>
 #include <QStyleFactory>
+#include <QTranslator>
 
 int main(int argc, char *argv[])
 {
@@ -10,6 +13,18 @@ int main(int argc, char *argv[])
     QCoreApplication::setApplicationName("USB Camera Control");
     QCoreApplication::setOrganizationName("CameraTools");
     QCoreApplication::setApplicationVersion(QStringLiteral(APP_VERSION));
+
+    QTranslator translator;
+    const QString languageSetting = QSettings().value(
+        QStringLiteral("ui/language"), QStringLiteral("system")).toString();
+    QString effectiveLanguage = languageSetting;
+    if (effectiveLanguage == QStringLiteral("system")) {
+        effectiveLanguage = QLocale::system().language() == QLocale::Chinese
+            ? QStringLiteral("zh_CN") : QStringLiteral("en_US");
+    }
+    if (effectiveLanguage.startsWith(QStringLiteral("en"))
+        && translator.load(QStringLiteral(":/i18n/usb_camera_control_en.qm")))
+        app.installTranslator(&translator);
     app.setStyle(QStyleFactory::create(QStringLiteral("Fusion")));
     app.setStyleSheet(QStringLiteral(R"(
         * {

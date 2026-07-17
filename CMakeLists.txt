@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.21)
 
-project(UsbCameraControl VERSION 0.5.2 LANGUAGES CXX)
+project(UsbCameraControl VERSION 0.6.0 LANGUAGES CXX)
 
 set(APP_BUILD_ID "local" CACHE STRING "Build identifier shown in the application")
 
@@ -9,7 +9,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 
-find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Widgets Multimedia MultimediaWidgets)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Widgets Multimedia MultimediaWidgets LinguistTools)
 
 qt_add_executable(UsbCameraControl WIN32 MACOSX_BUNDLE
     src/main.cpp
@@ -19,6 +19,13 @@ qt_add_executable(UsbCameraControl WIN32 MACOSX_BUNDLE
     src/VideoPreviewWidget.cpp
     src/VideoPreviewWidget.h
     resources.qrc
+)
+
+qt_add_translations(
+    TARGETS UsbCameraControl
+    TS_FILES translations/usb_camera_control_en.ts
+    RESOURCE_PREFIX "/i18n"
+    LUPDATE_OPTIONS -no-obsolete
 )
 
 if(WIN32)
