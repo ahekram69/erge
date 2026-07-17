@@ -11,6 +11,8 @@
 #include <QDateTime>
 #include <QDesktopServices>
 #include <QDir>
+#include <QFile>
+#include <QFileDialog>
 #include <QFrame>
 #include <QGroupBox>
 #include <QGridLayout>
@@ -27,6 +29,7 @@
 #include <QStatusBar>
 #include <QStandardPaths>
 #include <QStyle>
+#include <QSysInfo>
 #include <QTabWidget>
 #include <QTimer>
 #include <QVBoxLayout>
@@ -228,6 +231,9 @@ void MainWindow::buildUi()
     folderButtons->addWidget(picturesFolderButton);
     folderButtons->addWidget(moviesFolderButton);
     captureLayout->addLayout(folderButtons);
+    auto *diagnosticsButton = new QPushButton(tr("导出诊断信息"), captureGroup);
+    diagnosticsButton->setToolTip(tr("保存软件、系统和摄像头状态，便于排查问题"));
+    captureLayout->addWidget(diagnosticsButton);
 
     m_mirrorCheck = new QCheckBox(tr("左右镜像"), captureGroup);
     m_verticalCheck = new QCheckBox(tr("上下翻转"), captureGroup);
@@ -289,6 +295,7 @@ void MainWindow::buildUi()
     connect(m_recordButton, &QPushButton::clicked, this, &MainWindow::toggleRecording);
     connect(picturesFolderButton, &QPushButton::clicked, this, &MainWindow::openPicturesFolder);
     connect(moviesFolderButton, &QPushButton::clicked, this, &MainWindow::openMoviesFolder);
+    connect(diagnosticsButton, &QPushButton::clicked, this, &MainWindow::exportDiagnostics);
     connect(languageCombo, &QComboBox::currentIndexChanged, this,
             [this, languageCombo](int index) {
                 const QString language = languageCombo->itemData(index).toString();
@@ -856,6 +863,94 @@ void MainWindow::openPicturesFolder()
 void MainWindow::openMoviesFolder()
 {
     openFolder(mediaDirectory(QStandardPaths::MoviesLocation), tr("视频"));
+}
+
+void MainWindow::exportDiagnostics()
+{
+    const QString fileName = QStringLiteral("USB-Camera-Control-Diagnostics-%1.txt")
+        .arg(QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd-HHmmss")));
+    const QString defaultPath = QDir(
+        QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation)).filePath(fileName);
+    const QString path = QFileDialog::getSaveFileName(
+        this, tr("导出诊断信息"), defaultPath, tr("文本文件 (*.txt)"));
+    if (path.isEmpty())
+        return;
+
+    QStringList lines;
+    const auto add = [&lines](const QString &key, const QString &value) {
+        lines.append(QStringLiteral("%1: %2").arg(key, value));
+    };
+    add(QStringLiteral("GeneratedAt"),
+        QDateTime::currentDateTime().toString(Qt::ISODateWithMs));
+    add(QStringLiteral("AppVersion"), QStringLiteral(APP_VERSION));
+    add(QStringLiteral("BuildId"), QStringLiteral(APP_BUILD_ID));
+    add(QStringLiteral("QtVersion"), QString::fromLatin1(qVersion()));
+    add(QStringLiteral("OperatingSystem"), QSysInfo::prettyProductName());
+    add(QStringLiteral("Kernel"),
+        QStringLiteral("%1 %2").arg(QSysInfo::kernelType(), QSysInfo::kernelVersion()));
+    add(QStringLiteral("CpuArchitecture"), QSysInfo::currentCpuArchitecture());
+    add(QStringLiteral("SystemLocale"), QLocale::system().name());
+
+    QSettings settings;
+    add(QStringLiteral("LanguageSetting"),
+        settings.value(QStringLiteral("ui/language"), QStringLiteral("system")).toString());
+    add(QStringLiteral("SelectedDevice"), m_currentDeviceName);
+    add(QStringLiteral("SelectedFormat"), m_formatCombo->currentText());
+    add(QStringLiteral("PreviewRequested"), m_previewRequested ? QStringLiteral("true")
+                                                                 : QStringLiteral("false"));
+    add(QStringLiteral("CameraCreated"), m_camera ? QStringLiteral("true")
+                                                   : QStringLiteral("false"));
+    add(QStringLiteral("CameraActive"), m_camera && m_camera->isActive()
+                                            ? QStringLiteral("true") : QStringLiteral("false"));
+    add(QStringLiteral("FrameReceived"), m_receivedFrame ? QStringLiteral("true")
+                                                           : QStringLiteral("false"));
+    const QImage image = m_videoWidget->currentImage();
+    add(QStringLiteral("LastFrameSize"), image.isNull()
+            ? QStringLiteral("none")
+            : QStringLiteral("%1x%2").arg(image.width()).arg(image.height()));
+    if (m_camera) {
+        add(QStringLiteral("CameraErrorCode"), QString::number(m_camera->error()));
+        add(QStringLiteral("CameraErrorText"), m_camera->errorString());
+    }
+    add(QStringLiteral("RecorderState"),
+        QString::number(static_cast<int>(m_recorder->recorderState())));
+    add(QStringLiteral("RecorderErrorCode"), QString::number(m_recorder->error()));
+    add(QStringLiteral("RecorderErrorText"), m_recorder->errorString());
+    add(QStringLiteral("RecorderOutput"),
+        QDir::toNativeSeparators(m_recorder->actualLocation().toLocalFile()));
+    add(QStringLiteral("MirrorHorizontal"), m_mirrorCheck->isChecked()
+                                                ? QStringLiteral("true") : QStringLiteral("false"));
+    add(QStringLiteral("FlipVertical"), m_verticalCheck->isChecked()
+                                            ? QStringLiteral("true") : QStringLiteral("false"));
+    add(QStringLiteral("Rotation"), QString::number(m_rotationCombo->currentData().toInt()));
+
+    const auto devices = QMediaDevices::videoInputs();
+    lines.append(QString());
+    lines.append(QStringLiteral("[VideoDevices]"));
+    add(QStringLiteral("Count"), QString::number(devices.size()));
+    for (int i = 0; i < devices.size(); ++i) {
+        const auto &device = devices.at(i);
+        const QString prefix = QStringLiteral("Device%1").arg(i + 1);
+        add(prefix + QStringLiteral(".Name"), device.description());
+        add(prefix + QStringLiteral(".Id"), QString::fromLatin1(device.id().toHex()));
+        add(prefix + QStringLiteral(".Default"), device.isDefault()
+                                                     ? QStringLiteral("true") : QStringLiteral("false"));
+        add(prefix + QStringLiteral(".FormatCount"),
+            QString::number(device.videoFormats().size()));
+    }
+
+    QFile file(path);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        m_statusLabel->setText(tr("诊断信息导出失败：无法写入文件"));
+        return;
+    }
+    const QByteArray contents = (lines.join(QLatin1Char('\n')) + QLatin1Char('\n')).toUtf8();
+    if (file.write(contents) != contents.size()) {
+        m_statusLabel->setText(tr("诊断信息导出失败：文件写入不完整"));
+        return;
+    }
+    file.close();
+    m_statusLabel->setText(tr("诊断信息已保存：%1").arg(QDir::toNativeSeparators(path)));
 }
 
 void MainWindow::syncControls()

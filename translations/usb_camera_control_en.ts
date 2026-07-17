@@ -101,5 +101,11 @@
   <message><source>已打开%1保存目录</source><translation>Opened the %1 folder.</translation></message>
   <message><source>图片</source><translation>pictures</translation></message>
   <message><source>视频</source><translation>videos</translation></message>
+  <message><source>导出诊断信息</source><translation>Export Diagnostics</translation></message>
+  <message><source>保存软件、系统和摄像头状态，便于排查问题</source><translation>Save app, system, and camera details for troubleshooting</translation></message>
+  <message><source>文本文件 (*.txt)</source><translation>Text Files (*.txt)</translation></message>
+  <message><source>诊断信息导出失败：无法写入文件</source><translation>Diagnostics export failed: the file could not be opened for writing.</translation></message>
+  <message><source>诊断信息导出失败：文件写入不完整</source><translation>Diagnostics export failed: the file was not written completely.</translation></message>
+  <message><source>诊断信息已保存：%1</source><translation>Diagnostics saved: %1</translation></message>
 </context>
 </TS>

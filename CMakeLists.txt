@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.21)
 
-project(UsbCameraControl VERSION 0.7.1 LANGUAGES CXX)
+project(UsbCameraControl VERSION 0.8.0 LANGUAGES CXX)
 
 set(APP_BUILD_ID "local" CACHE STRING "Build identifier shown in the application")
 

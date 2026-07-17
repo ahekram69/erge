@@ -40,6 +40,7 @@ private slots:
     void updateRecorderState();
     void showRecorderError();
     void handleDeviceChange();
+    void exportDiagnostics();
 
 private:
     void buildUi();
