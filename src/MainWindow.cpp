@@ -12,6 +12,7 @@
 #include <QDir>
 #include <QFrame>
 #include <QGroupBox>
+#include <QGridLayout>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QMessageBox>
@@ -184,6 +185,7 @@ void MainWindow::buildUi()
     parameterScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     parameterScroll->setFrameShape(QFrame::NoFrame);
     auto *parameterContent = new QWidget(parameterScroll);
+    parameterContent->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
     auto *parameterLayout = new QVBoxLayout(parameterContent);
     parameterLayout->setContentsMargins(0, 0, 4, 0);
     parameterLayout->setSpacing(8);
@@ -393,14 +395,21 @@ void MainWindow::rebuildNativeControls()
         return;
     }
 
-    auto *buttonRow = new QHBoxLayout;
-    auto *saveButton = new QPushButton(tr("保存当前设置"), this);
-    auto *loadButton = new QPushButton(tr("应用已保存设置"), this);
-    auto *resetButton = new QPushButton(tr("恢复设备默认值"), this);
-    buttonRow->addWidget(saveButton);
-    buttonRow->addWidget(loadButton);
-    buttonRow->addWidget(resetButton);
-    m_nativeControlsLayout->addLayout(buttonRow);
+    auto *buttonGrid = new QGridLayout;
+    buttonGrid->setHorizontalSpacing(8);
+    buttonGrid->setVerticalSpacing(8);
+    auto *saveButton = new QPushButton(tr("保存参数"), this);
+    auto *loadButton = new QPushButton(tr("应用参数"), this);
+    auto *resetButton = new QPushButton(tr("恢复默认"), this);
+    saveButton->setToolTip(tr("保存当前摄像头的参数"));
+    loadButton->setToolTip(tr("应用之前保存的参数"));
+    resetButton->setToolTip(tr("恢复摄像头的设备默认参数"));
+    buttonGrid->addWidget(saveButton, 0, 0);
+    buttonGrid->addWidget(loadButton, 0, 1);
+    buttonGrid->addWidget(resetButton, 1, 0, 1, 2);
+    buttonGrid->setColumnStretch(0, 1);
+    buttonGrid->setColumnStretch(1, 1);
+    m_nativeControlsLayout->addLayout(buttonGrid);
     connect(saveButton, &QPushButton::clicked, this, &MainWindow::saveNativePreset);
     connect(loadButton, &QPushButton::clicked, this, &MainWindow::loadNativePreset);
     connect(resetButton, &QPushButton::clicked, this, &MainWindow::resetNativeControls);
