@@ -4,6 +4,8 @@
 #include <QMainWindow>
 #include <QMediaCaptureSession>
 #include <QMediaDevices>
+#include <QStandardPaths>
+#include <QTimer>
 
 #include <memory>
 
@@ -37,6 +39,7 @@ private slots:
     void toggleRecording();
     void updateRecorderState();
     void showRecorderError();
+    void handleDeviceChange();
 
 private:
     void buildUi();
@@ -47,12 +50,17 @@ private:
     void saveNativePreset();
     void loadNativePreset();
     void resetNativeControls();
+    void openPicturesFolder();
+    void openMoviesFolder();
+    QString mediaDirectory(QStandardPaths::StandardLocation location) const;
+    bool openFolder(const QString &path, const QString &name);
     void setConnectionBadge(const QString &text, const QString &state);
     QString presetGroup() const;
     void syncControls();
     QString formatLabel(const QCameraFormat &format) const;
 
     QMediaDevices m_mediaDevices;
+    QTimer m_deviceRefreshTimer;
     QMediaCaptureSession m_captureSession;
     std::unique_ptr<QCamera> m_camera;
     std::unique_ptr<NativeCameraControls> m_nativeControls;
@@ -76,4 +84,6 @@ private:
     QVBoxLayout *m_nativeControlsLayout = nullptr;
     QString m_currentDeviceName;
     bool m_receivedFrame = false;
+    bool m_previewRequested = true;
+    quint64 m_cameraGeneration = 0;
 };

@@ -9,6 +9,7 @@
 #include <QPermissions>
 #include <QComboBox>
 #include <QDateTime>
+#include <QDesktopServices>
 #include <QDir>
 #include <QFrame>
 #include <QGroupBox>
@@ -20,7 +21,9 @@
 #include <QPushButton>
 #include <QScrollArea>
 #include <QSettings>
+#include <QSignalBlocker>
 #include <QSlider>
+#include <QSpinBox>
 #include <QStatusBar>
 #include <QStandardPaths>
 #include <QStyle>
@@ -32,6 +35,7 @@
 #include <QUrl>
 
 #include <algorithm>
+#include <QStringList>
 
 namespace {
 constexpr int SliderScale = 100;
@@ -54,8 +58,11 @@ MainWindow::MainWindow(QWidget *parent)
     m_recorder = std::make_unique<QMediaRecorder>();
     m_captureSession.setRecorder(m_recorder.get());
     buildUi();
+    m_deviceRefreshTimer.setSingleShot(true);
+    m_deviceRefreshTimer.setInterval(700);
+    connect(&m_deviceRefreshTimer, &QTimer::timeout, this, &MainWindow::refreshDevices);
     connect(&m_mediaDevices, &QMediaDevices::videoInputsChanged,
-            this, &MainWindow::refreshDevices);
+            this, &MainWindow::handleDeviceChange);
     requestCameraPermission();
 }
 
@@ -204,6 +211,13 @@ void MainWindow::buildUi()
     captureButtons->addWidget(m_recordButton);
     captureLayout->addLayout(captureButtons);
 
+    auto *folderButtons = new QHBoxLayout;
+    auto *picturesFolderButton = new QPushButton(tr("图片文件夹"), captureGroup);
+    auto *moviesFolderButton = new QPushButton(tr("视频文件夹"), captureGroup);
+    folderButtons->addWidget(picturesFolderButton);
+    folderButtons->addWidget(moviesFolderButton);
+    captureLayout->addLayout(folderButtons);
+
     m_mirrorCheck = new QCheckBox(tr("左右镜像"), captureGroup);
     m_verticalCheck = new QCheckBox(tr("上下翻转"), captureGroup);
     m_rotationCombo = new QComboBox(captureGroup);
@@ -262,6 +276,8 @@ void MainWindow::buildUi()
     connect(m_startButton, &QPushButton::clicked, this, &MainWindow::toggleCamera);
     connect(m_snapshotButton, &QPushButton::clicked, this, &MainWindow::takeSnapshot);
     connect(m_recordButton, &QPushButton::clicked, this, &MainWindow::toggleRecording);
+    connect(picturesFolderButton, &QPushButton::clicked, this, &MainWindow::openPicturesFolder);
+    connect(moviesFolderButton, &QPushButton::clicked, this, &MainWindow::openMoviesFolder);
     connect(m_mirrorCheck, &QCheckBox::toggled, this, [this](bool enabled) {
         m_videoWidget->setMirrored(enabled);
         QSettings().setValue(QStringLiteral("preview/mirrored"), enabled);
@@ -309,6 +325,25 @@ void MainWindow::buildUi()
     });
 }
 
+void MainWindow::handleDeviceChange()
+{
+    if (m_recorder->recorderState() == QMediaRecorder::RecordingState)
+        m_recorder->stop();
+
+    ++m_cameraGeneration;
+    if (m_camera) {
+        m_camera->stop();
+        m_captureSession.setCamera(nullptr);
+        m_camera.reset();
+    }
+    m_receivedFrame = false;
+    m_formatCombo->setEnabled(false);
+    m_startButton->setEnabled(false);
+    setConnectionBadge(tr("●  设备变化"), QStringLiteral("waiting"));
+    m_statusLabel->setText(tr("检测到摄像头变化，正在重新连接…"));
+    m_deviceRefreshTimer.start();
+}
+
 void MainWindow::refreshDevices()
 {
     const auto devices = QMediaDevices::videoInputs();
@@ -331,8 +366,14 @@ void MainWindow::refreshDevices()
     m_deviceCombo->setEnabled(found);
     m_startButton->setEnabled(found);
     if (!found) {
+        ++m_cameraGeneration;
+        m_captureSession.setCamera(nullptr);
         m_camera.reset();
+        m_currentDeviceName.clear();
         m_formatCombo->clear();
+        m_formatCombo->setEnabled(false);
+        m_snapshotButton->setEnabled(false);
+        m_recordButton->setEnabled(false);
         m_statusLabel->setText(tr("未检测到摄像头，请连接 USB 摄像头后刷新。"));
         setConnectionBadge(tr("●  未连接"), QStringLiteral("error"));
         syncControls();
@@ -354,6 +395,7 @@ void MainWindow::selectCamera(int index)
 
 void MainWindow::openCamera(const QCameraDevice &device)
 {
+    const quint64 generation = ++m_cameraGeneration;
     if (m_camera)
         m_camera->stop();
 
@@ -373,9 +415,14 @@ void MainWindow::openCamera(const QCameraDevice &device)
     }
     syncControls();
     m_statusLabel->setText(tr("已选择：%1").arg(device.description()));
-    m_camera->start();
-    QTimer::singleShot(3000, this, [this] {
-        if (m_camera && m_camera->isActive() && !m_receivedFrame)
+    m_formatCombo->setEnabled(true);
+    m_snapshotButton->setEnabled(true);
+    m_recordButton->setEnabled(true);
+    if (m_previewRequested)
+        m_camera->start();
+    QTimer::singleShot(3000, this, [this, generation] {
+        if (generation == m_cameraGeneration && m_camera
+            && m_camera->isActive() && !m_receivedFrame)
             m_statusLabel->setText(tr("摄像头已启动，但尚未收到画面。请使用“自动（推荐）”格式。"));
     });
 }
@@ -394,6 +441,13 @@ void MainWindow::rebuildNativeControls()
         m_nativeControlsLayout->addWidget(message);
         return;
     }
+
+    auto *capabilityLabel = new QLabel(
+        tr("已识别 %1 项可调参数，仅显示当前摄像头支持的项目。")
+            .arg(controls.size()), this);
+    capabilityLabel->setObjectName(QStringLiteral("secondaryText"));
+    capabilityLabel->setWordWrap(true);
+    m_nativeControlsLayout->addWidget(capabilityLabel);
 
     auto *buttonGrid = new QGridLayout;
     buttonGrid->setHorizontalSpacing(8);
@@ -421,13 +475,22 @@ void MainWindow::rebuildNativeControls()
 
         auto *titleRow = new QHBoxLayout;
         auto *title = new QLabel(control.name, container);
-        auto *valueLabel = new QLabel(QString::number(control.value), container);
+        auto *valueInput = new QSpinBox(container);
+        valueInput->setRange(static_cast<int>(control.minimum),
+                             static_cast<int>(control.maximum));
+        valueInput->setSingleStep(static_cast<int>(control.step));
+        valueInput->setValue(static_cast<int>(control.value));
+        valueInput->setToolTip(tr("范围：%1 ～ %2，默认值：%3")
+                                   .arg(control.minimum)
+                                   .arg(control.maximum)
+                                   .arg(control.defaultValue));
+        valueInput->setMaximumWidth(92);
         auto *autoBox = new QCheckBox(tr("自动"), container);
         autoBox->setVisible(control.autoSupported);
         autoBox->setChecked(control.automatic);
         titleRow->addWidget(title);
         titleRow->addStretch();
-        titleRow->addWidget(valueLabel);
+        titleRow->addWidget(valueInput);
         titleRow->addWidget(autoBox);
 
         auto *slider = new QSlider(Qt::Horizontal, container);
@@ -437,16 +500,34 @@ void MainWindow::rebuildNativeControls()
         slider->setPageStep(static_cast<int>(control.step));
         slider->setValue(static_cast<int>(control.value));
         slider->setEnabled(!control.automatic);
+        valueInput->setEnabled(!control.automatic);
 
         connect(slider, &QSlider::valueChanged, this,
-                [this, id = control.id, valueLabel](int value) {
-                    if (m_nativeControls->setValue(id, value))
-                        valueLabel->setText(QString::number(value));
+                [this, id = control.id, valueInput, name = control.name](int value) {
+                    if (m_nativeControls->setValue(id, value)) {
+                        const QSignalBlocker blocker(valueInput);
+                        valueInput->setValue(value);
+                    } else {
+                        m_statusLabel->setText(tr("%1设置失败，摄像头未接受该数值").arg(name));
+                    }
+                });
+        connect(valueInput, &QSpinBox::valueChanged, this,
+                [this, id = control.id, slider, name = control.name](int value) {
+                    if (m_nativeControls->setValue(id, value)) {
+                        const QSignalBlocker blocker(slider);
+                        slider->setValue(value);
+                    } else {
+                        m_statusLabel->setText(tr("%1设置失败，摄像头未接受该数值").arg(name));
+                    }
                 });
         connect(autoBox, &QCheckBox::toggled, this,
-                [this, id = control.id, slider](bool enabled) {
-                    if (m_nativeControls->setAutomatic(id, enabled))
+                [this, id = control.id, slider, valueInput, name = control.name](bool enabled) {
+                    if (m_nativeControls->setAutomatic(id, enabled)) {
                         slider->setEnabled(!enabled);
+                        valueInput->setEnabled(!enabled);
+                    } else {
+                        m_statusLabel->setText(tr("%1的自动模式切换失败").arg(name));
+                    }
                 });
 
         layout->addLayout(titleRow);
@@ -479,7 +560,12 @@ void MainWindow::saveNativePreset()
     }
     settings.endGroup();
     settings.sync();
-    m_statusLabel->setText(tr("已保存“%1”的当前设置").arg(m_currentDeviceName));
+    if (settings.status() == QSettings::NoError)
+        m_statusLabel->setText(tr("保存成功：已保存“%1”的 %2 项参数")
+                                   .arg(m_currentDeviceName)
+                                   .arg(m_nativeControls->controls().size()));
+    else
+        m_statusLabel->setText(tr("保存失败：无法写入本机设置"));
 }
 
 void MainWindow::loadNativePreset()
@@ -496,6 +582,7 @@ void MainWindow::loadNativePreset()
     }
 
     int applied = 0;
+    QStringList failed;
     for (const auto &control : m_nativeControls->controls()) {
         const QString key = QString::number(static_cast<int>(control.id));
         const QString valueKey = key + QStringLiteral("/value");
@@ -503,15 +590,23 @@ void MainWindow::loadNativePreset()
             continue;
         const long value = settings.value(valueKey).toLongLong();
         const bool automatic = settings.value(key + QStringLiteral("/automatic"), false).toBool();
-        m_nativeControls->setAutomatic(control.id, false);
         if (m_nativeControls->setValue(control.id, value))
             ++applied;
-        if (control.autoSupported && automatic)
-            m_nativeControls->setAutomatic(control.id, true);
+        else
+            failed.append(control.name);
+        if (control.autoSupported && automatic
+            && !m_nativeControls->setAutomatic(control.id, true)
+            && !failed.contains(control.name))
+            failed.append(control.name);
     }
     settings.endGroup();
     rebuildNativeControls();
-    m_statusLabel->setText(tr("已应用保存的设置，共更新 %1 项参数").arg(applied));
+    if (failed.isEmpty())
+        m_statusLabel->setText(tr("应用成功：已更新 %1 项参数").arg(applied));
+    else
+        m_statusLabel->setText(tr("部分参数未应用：%1（成功 %2 项）")
+                                   .arg(failed.join(QStringLiteral("、")))
+                                   .arg(applied));
 }
 
 void MainWindow::resetNativeControls()
@@ -520,13 +615,20 @@ void MainWindow::resetNativeControls()
         return;
 
     int applied = 0;
+    QStringList failed;
     for (const auto &control : m_nativeControls->controls()) {
-        m_nativeControls->setAutomatic(control.id, false);
         if (m_nativeControls->setValue(control.id, control.defaultValue))
             ++applied;
+        else
+            failed.append(control.name);
     }
     rebuildNativeControls();
-    m_statusLabel->setText(tr("已恢复设备默认值，共重置 %1 项参数").arg(applied));
+    if (failed.isEmpty())
+        m_statusLabel->setText(tr("恢复成功：已重置 %1 项参数").arg(applied));
+    else
+        m_statusLabel->setText(tr("部分参数未恢复：%1（成功 %2 项）")
+                                   .arg(failed.join(QStringLiteral("、")))
+                                   .arg(applied));
 }
 
 void MainWindow::populateFormats(const QCameraDevice &device)
@@ -568,8 +670,10 @@ void MainWindow::selectFormat(int index)
     m_camera->setCameraFormat(format);
     if (wasActive)
         m_camera->start();
-    QTimer::singleShot(3000, this, [this] {
-        if (m_camera && m_camera->isActive() && !m_receivedFrame)
+    const quint64 generation = m_cameraGeneration;
+    QTimer::singleShot(3000, this, [this, generation] {
+        if (generation == m_cameraGeneration && m_camera
+            && m_camera->isActive() && !m_receivedFrame)
             m_statusLabel->setText(tr("当前格式没有收到画面，请改回“自动（推荐）”。"));
     });
 }
@@ -580,6 +684,7 @@ void MainWindow::toggleCamera()
         return;
     if (m_camera->isActive() && m_recorder->recorderState() == QMediaRecorder::RecordingState)
         m_recorder->stop();
+    m_previewRequested = !m_camera->isActive();
     m_camera->isActive() ? m_camera->stop() : m_camera->start();
 }
 
@@ -619,8 +724,7 @@ void MainWindow::takeSnapshot()
         return;
     }
 
-    const QString pictures = QStandardPaths::writableLocation(QStandardPaths::PicturesLocation);
-    QDir directory(pictures + QStringLiteral("/USB Camera Control"));
+    QDir directory(mediaDirectory(QStandardPaths::PicturesLocation));
     if (!directory.exists() && !directory.mkpath(QStringLiteral("."))) {
         m_statusLabel->setText(tr("截图失败：无法创建图片保存目录"));
         return;
@@ -645,11 +749,12 @@ void MainWindow::toggleRecording()
         m_statusLabel->setText(tr("录像失败：未选择摄像头"));
         return;
     }
-    if (!m_camera->isActive())
+    if (!m_camera->isActive()) {
+        m_previewRequested = true;
         m_camera->start();
+    }
 
-    const QString movies = QStandardPaths::writableLocation(QStandardPaths::MoviesLocation);
-    QDir directory(movies + QStringLiteral("/USB Camera Control"));
+    QDir directory(mediaDirectory(QStandardPaths::MoviesLocation));
     if (!directory.exists() && !directory.mkpath(QStringLiteral("."))) {
         m_statusLabel->setText(tr("录像失败：无法创建视频保存目录"));
         return;
@@ -683,6 +788,37 @@ void MainWindow::showRecorderError()
     if (m_recorder->error() == QMediaRecorder::NoError)
         return;
     m_statusLabel->setText(tr("录像错误：%1").arg(m_recorder->errorString()));
+}
+
+QString MainWindow::mediaDirectory(QStandardPaths::StandardLocation location) const
+{
+    return QDir(QStandardPaths::writableLocation(location))
+        .filePath(QStringLiteral("USB Camera Control"));
+}
+
+bool MainWindow::openFolder(const QString &path, const QString &name)
+{
+    QDir directory(path);
+    if (!directory.exists() && !directory.mkpath(QStringLiteral("."))) {
+        m_statusLabel->setText(tr("无法创建%1保存目录").arg(name));
+        return false;
+    }
+    if (!QDesktopServices::openUrl(QUrl::fromLocalFile(directory.absolutePath()))) {
+        m_statusLabel->setText(tr("无法打开%1保存目录").arg(name));
+        return false;
+    }
+    m_statusLabel->setText(tr("已打开%1保存目录").arg(name));
+    return true;
+}
+
+void MainWindow::openPicturesFolder()
+{
+    openFolder(mediaDirectory(QStandardPaths::PicturesLocation), tr("图片"));
+}
+
+void MainWindow::openMoviesFolder()
+{
+    openFolder(mediaDirectory(QStandardPaths::MoviesLocation), tr("视频"));
 }
 
 void MainWindow::syncControls()

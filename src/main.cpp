@@ -25,6 +25,7 @@ int main(int argc, char *argv[])
         }
         QLabel#appTitle { font-size: 20px; font-weight: 700; color: #1d1d1f; }
         QLabel#appSubtitle { color: #6e6e73; }
+        QLabel#secondaryText { color: #6e6e73; }
         QLabel#connectionBadge {
             background: #eeeeF2;
             color: #6e6e73;
@@ -59,14 +60,14 @@ int main(int argc, char *argv[])
         }
         QTabBar::tab:selected { background: #ffffff; color: #0071e3; }
         QTabBar::tab:hover:!selected { background: #dedee3; color: #1d1d1f; }
-        QComboBox, QPushButton {
+        QComboBox, QPushButton, QSpinBox {
             min-height: 34px;
             background: #ffffff;
             border: 1px solid #d2d2d7;
             border-radius: 8px;
             padding: 0 10px;
         }
-        QComboBox:hover, QPushButton:hover { border-color: #0071e3; background: #f7f9fc; }
+        QComboBox:hover, QPushButton:hover, QSpinBox:hover { border-color: #0071e3; background: #f7f9fc; }
         QPushButton:pressed { background: #ececf1; }
         QPushButton#primaryButton { background: #0071e3; border-color: #0071e3; color: white; font-weight: 700; }
         QPushButton#primaryButton:hover { background: #0077ed; }
