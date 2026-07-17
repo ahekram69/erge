@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.21)
 
-project(UsbCameraControl VERSION 0.1.0 LANGUAGES CXX)
+project(UsbCameraControl VERSION 0.3.0 LANGUAGES CXX)
+
+set(APP_BUILD_ID "local" CACHE STRING "Build identifier shown in the application")
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -31,6 +33,11 @@ target_link_libraries(UsbCameraControl PRIVATE
     Qt6::MultimediaWidgets
 )
 
+target_compile_definitions(UsbCameraControl PRIVATE
+    APP_VERSION="${PROJECT_VERSION}"
+    APP_BUILD_ID="${APP_BUILD_ID}"
+)
+
 set_target_properties(UsbCameraControl PROPERTIES
     WIN32_EXECUTABLE TRUE
     MACOSX_BUNDLE TRUE
@@ -40,6 +47,9 @@ set_target_properties(UsbCameraControl PROPERTIES
 )
 
 if(WIN32)
+    set_target_properties(UsbCameraControl PROPERTIES
+        OUTPUT_NAME "UsbCameraControl-v${PROJECT_VERSION}"
+    )
     target_compile_definitions(UsbCameraControl PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
     target_link_libraries(UsbCameraControl PRIVATE strmiids ole32 oleaut32)
     install(TARGETS UsbCameraControl RUNTIME DESTINATION .)

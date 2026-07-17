@@ -1,5 +1,8 @@
 name: Windows Build
 
+env:
+  APP_VERSION: "0.3.0"
+
 on:
   workflow_dispatch:
   push:
@@ -25,7 +28,7 @@ jobs:
           cache: true
 
       - name: Configure
-        run: cmake -S . -B build -A x64 -DCMAKE_BUILD_TYPE=Release
+        run: cmake -S . -B build -A x64 -DCMAKE_BUILD_TYPE=Release -DAPP_BUILD_ID=${{ github.sha }}
 
       - name: Build
         run: cmake --build build --config Release --parallel
@@ -34,17 +37,14 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path package | Out-Null
-          Copy-Item build/Release/UsbCameraControl.exe package/
-          windeployqt --release --no-translations --compiler-runtime package/UsbCameraControl.exe
-
-      - name: Create test package
-        shell: pwsh
-        run: Compress-Archive -Path package/* -DestinationPath UsbCameraControl-Windows.zip
+          $exeName = "UsbCameraControl-v$env:APP_VERSION.exe"
+          Copy-Item "build/Release/$exeName" package/
+          windeployqt --release --no-translations --compiler-runtime "package/$exeName"
 
       - name: Upload Windows test build
         uses: actions/upload-artifact@v4
         with:
-          name: UsbCameraControl-Windows
-          path: UsbCameraControl-Windows.zip
+          name: UsbCameraControl-Windows-v${{ env.APP_VERSION }}-build-${{ github.run_number }}
+          path: package/
           if-no-files-found: error
           retention-days: 14

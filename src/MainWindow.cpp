@@ -94,8 +94,12 @@ void MainWindow::requestCameraPermission()
 
 void MainWindow::buildUi()
 {
-    setWindowTitle(tr("USB 摄像头控制"));
+    const QString buildId = QStringLiteral(APP_BUILD_ID).left(7);
+    setWindowTitle(tr("USB 摄像头控制 v%1 (%2)")
+                       .arg(QStringLiteral(APP_VERSION), buildId));
     resize(1180, 720);
+    statusBar()->addPermanentWidget(
+        new QLabel(tr("版本 v%1 · %2").arg(QStringLiteral(APP_VERSION), buildId), this));
 
     auto *central = new QWidget(this);
     auto *root = new QHBoxLayout(central);

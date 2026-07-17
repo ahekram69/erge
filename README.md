@@ -2,8 +2,9 @@
 
 Windows 优先、macOS 次优先的 USB 摄像头预览与参数控制软件。
 
-每次推送代码后，GitHub Actions 会自动生成 Windows 测试包。在仓库的
-**Actions → Windows Build** 页面可以下载 `UsbCameraControl-Windows` 构建产物。
+每次推送代码后，GitHub Actions 会自动生成带版本号和构建编号的 Windows
+测试包。在仓库的 **Actions → Windows Build** 页面下载后只需解压一次。
+软件窗口标题和 EXE 文件名也会显示版本号，便于区分新旧版本。
 
 ## 当前原型
 
