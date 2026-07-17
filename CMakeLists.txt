@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.21)
 
-project(UsbCameraControl VERSION 0.8.0 LANGUAGES CXX)
+project(UsbCameraControl VERSION 0.9.1 LANGUAGES CXX)
 
 set(APP_BUILD_ID "local" CACHE STRING "Build identifier shown in the application")
 
@@ -33,9 +33,9 @@ if(WIN32)
         src/NativeCameraControls_windows.cpp
         windows/app-icon.rc
     )
-else()
+elseif(APPLE)
     target_sources(UsbCameraControl PRIVATE
-        src/NativeCameraControls_stub.cpp
+        src/NativeCameraControls_macos.cpp
         assets/app-icon.icns
         macos/en.lproj/InfoPlist.strings
         macos/zh-Hans.lproj/InfoPlist.strings
@@ -49,6 +49,9 @@ else()
     set_source_files_properties(macos/zh-Hans.lproj/InfoPlist.strings PROPERTIES
         MACOSX_PACKAGE_LOCATION "Resources/zh-Hans.lproj"
     )
+    target_link_libraries(UsbCameraControl PRIVATE "-framework CoreMediaIO")
+else()
+    target_sources(UsbCameraControl PRIVATE src/NativeCameraControls_stub.cpp)
 endif()
 
 target_link_libraries(UsbCameraControl PRIVATE

@@ -483,10 +483,10 @@ void MainWindow::rebuildNativeControls()
     buttonGrid->setVerticalSpacing(8);
     auto *saveButton = new QPushButton(tr("保存参数"), this);
     auto *loadButton = new QPushButton(tr("应用参数"), this);
-    auto *resetButton = new QPushButton(tr("恢复默认"), this);
+    auto *resetButton = new QPushButton(tr("恢复初始设置"), this);
     saveButton->setToolTip(tr("保存当前摄像头的参数"));
     loadButton->setToolTip(tr("应用之前保存的参数"));
-    resetButton->setToolTip(tr("恢复摄像头的设备默认参数"));
+    resetButton->setToolTip(tr("恢复本次打开摄像头时的参数和自动模式"));
     buttonGrid->addWidget(saveButton, 0, 0);
     buttonGrid->addWidget(loadButton, 0, 1);
     buttonGrid->addWidget(resetButton, 1, 0, 1, 2);
@@ -524,7 +524,7 @@ void MainWindow::rebuildNativeControls()
                              static_cast<int>(control.maximum));
         valueInput->setSingleStep(static_cast<int>(control.step));
         valueInput->setValue(static_cast<int>(control.value));
-        valueInput->setToolTip(tr("范围：%1 ～ %2，默认值：%3")
+        valueInput->setToolTip(tr("范围：%1 ～ %2，初始值：%3")
                                    .arg(control.minimum)
                                    .arg(control.maximum)
                                    .arg(control.defaultValue));
@@ -665,10 +665,15 @@ void MainWindow::resetNativeControls()
             ++applied;
         else
             failed.append(control.name);
+        if (control.autoSupported
+            && !m_nativeControls->setAutomatic(control.id, control.defaultAutomatic)
+            && !failed.contains(control.name)) {
+            failed.append(control.name);
+        }
     }
     rebuildNativeControls();
     if (failed.isEmpty())
-        m_statusLabel->setText(tr("恢复成功：已重置 %1 项参数").arg(applied));
+        m_statusLabel->setText(tr("恢复成功：已恢复 %1 项初始设置").arg(applied));
     else
         m_statusLabel->setText(tr("部分参数未恢复：%1（成功 %2 项）")
                                    .arg(failed.join(QStringLiteral("、")))

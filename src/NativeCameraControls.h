@@ -33,6 +33,7 @@ public:
         long value = 0;
         bool autoSupported = false;
         bool automatic = false;
+        bool defaultAutomatic = false;
     };
 
     virtual ~NativeCameraControls() = default;

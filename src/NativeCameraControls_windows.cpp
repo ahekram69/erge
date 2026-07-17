@@ -213,7 +213,10 @@ private:
             control.minimum = minimum;
             control.maximum = maximum;
             control.step = std::max(1L, step);
-            control.defaultValue = defaultValue;
+            // "Restore Initial Settings" means the state observed when this
+            // camera was opened, not the driver's factory value. Factory
+            // values can be unexpectedly dark and may not match auto modes.
+            control.defaultValue = value;
             control.value = value;
             if (mapping.kind == InterfaceKind::VideoProcAmp) {
                 control.autoSupported = (capabilities & VideoProcAmp_Flags_Auto) != 0;
@@ -222,6 +225,7 @@ private:
                 control.autoSupported = (capabilities & CameraControl_Flags_Auto) != 0;
                 control.automatic = (flags & CameraControl_Flags_Auto) != 0;
             }
+            control.defaultAutomatic = control.automatic;
             m_controls.append(control);
         }
     }
