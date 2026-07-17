@@ -273,9 +273,9 @@ void MainWindow::rebuildNativeControls()
     }
 
     auto *buttonRow = new QHBoxLayout;
-    auto *saveButton = new QPushButton(tr("保存预设"), this);
-    auto *loadButton = new QPushButton(tr("加载预设"), this);
-    auto *resetButton = new QPushButton(tr("恢复默认"), this);
+    auto *saveButton = new QPushButton(tr("保存当前设置"), this);
+    auto *loadButton = new QPushButton(tr("应用已保存设置"), this);
+    auto *resetButton = new QPushButton(tr("恢复设备默认值"), this);
     buttonRow->addWidget(saveButton);
     buttonRow->addWidget(loadButton);
     buttonRow->addWidget(resetButton);
@@ -349,7 +349,7 @@ void MainWindow::saveNativePreset()
     }
     settings.endGroup();
     settings.sync();
-    m_statusLabel->setText(tr("已保存“%1”的参数预设").arg(m_currentDeviceName));
+    m_statusLabel->setText(tr("已保存“%1”的当前设置").arg(m_currentDeviceName));
 }
 
 void MainWindow::loadNativePreset()
@@ -361,7 +361,7 @@ void MainWindow::loadNativePreset()
     settings.beginGroup(presetGroup());
     if (!settings.contains(QStringLiteral("deviceName"))) {
         settings.endGroup();
-        m_statusLabel->setText(tr("当前摄像头还没有保存过预设"));
+        m_statusLabel->setText(tr("当前摄像头还没有已保存的设置"));
         return;
     }
 
@@ -381,7 +381,7 @@ void MainWindow::loadNativePreset()
     }
     settings.endGroup();
     rebuildNativeControls();
-    m_statusLabel->setText(tr("已加载预设，共应用 %1 项参数").arg(applied));
+    m_statusLabel->setText(tr("已应用保存的设置，共更新 %1 项参数").arg(applied));
 }
 
 void MainWindow::resetNativeControls()
@@ -396,7 +396,7 @@ void MainWindow::resetNativeControls()
             ++applied;
     }
     rebuildNativeControls();
-    m_statusLabel->setText(tr("已恢复硬件默认值，共重置 %1 项参数").arg(applied));
+    m_statusLabel->setText(tr("已恢复设备默认值，共重置 %1 项参数").arg(applied));
 }
 
 void MainWindow::populateFormats(const QCameraDevice &device)
