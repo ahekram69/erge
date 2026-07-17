@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.21)
 
-project(UsbCameraControl VERSION 0.6.1 LANGUAGES CXX)
+project(UsbCameraControl VERSION 0.6.2 LANGUAGES CXX)
 
 set(APP_BUILD_ID "local" CACHE STRING "Build identifier shown in the application")
 
@@ -29,9 +29,18 @@ qt_add_translations(
 )
 
 if(WIN32)
-    target_sources(UsbCameraControl PRIVATE src/NativeCameraControls_windows.cpp)
+    target_sources(UsbCameraControl PRIVATE
+        src/NativeCameraControls_windows.cpp
+        windows/app-icon.rc
+    )
 else()
-    target_sources(UsbCameraControl PRIVATE src/NativeCameraControls_stub.cpp)
+    target_sources(UsbCameraControl PRIVATE
+        src/NativeCameraControls_stub.cpp
+        assets/app-icon.icns
+    )
+    set_source_files_properties(assets/app-icon.icns PROPERTIES
+        MACOSX_PACKAGE_LOCATION "Resources"
+    )
 endif()
 
 target_link_libraries(UsbCameraControl PRIVATE
@@ -51,6 +60,7 @@ set_target_properties(UsbCameraControl PROPERTIES
     WIN32_EXECUTABLE TRUE
     MACOSX_BUNDLE TRUE
     MACOSX_BUNDLE_BUNDLE_NAME "USB Camera Control"
+    MACOSX_BUNDLE_ICON_FILE "app-icon.icns"
     MACOSX_BUNDLE_GUI_IDENTIFIER "com.example.usbcameracontrol"
     MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/macos/Info.plist.in"
 )

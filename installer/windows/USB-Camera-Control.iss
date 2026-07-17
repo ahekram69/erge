@@ -21,7 +21,9 @@ OutputBaseFilename=USB-Camera-Control-Setup-v{#MyAppVersion}
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
+SetupIconFile=..\..\assets\app-icon.ico
 UninstallDisplayName={#MyAppName} {#MyAppVersion}
+UninstallDisplayIcon={app}\{#MyAppExeName}
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
