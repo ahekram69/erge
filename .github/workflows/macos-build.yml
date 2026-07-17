@@ -1,7 +1,7 @@
 name: macOS Build
 
 env:
-  APP_VERSION: "0.7.0"
+  APP_VERSION: "0.7.1"
 
 on:
   workflow_dispatch:
@@ -24,7 +24,7 @@ jobs:
         with:
           version: "6.8.3"
           arch: clang_64
-          modules: qtmultimedia qttools
+          modules: qtmultimedia
           cache: true
 
       - name: Configure
