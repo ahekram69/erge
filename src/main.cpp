@@ -92,7 +92,16 @@ int main(int argc, char *argv[])
             border-bottom-right-radius: 8px;
         }
         QSpinBox::up-button:hover, QSpinBox::down-button:hover { background: #e8e8ed; }
-        QSpinBox::up-arrow, QSpinBox::down-arrow { width: 8px; height: 8px; }
+        QSpinBox::up-arrow {
+            image: url(:/icons/spin-up.svg);
+            width: 12px;
+            height: 8px;
+        }
+        QSpinBox::down-arrow {
+            image: url(:/icons/spin-down.svg);
+            width: 12px;
+            height: 8px;
+        }
         QPushButton:pressed { background: #ececf1; }
         QPushButton#primaryButton { background: #0071e3; border-color: #0071e3; color: white; font-weight: 700; }
         QPushButton#primaryButton:hover { background: #0077ed; }

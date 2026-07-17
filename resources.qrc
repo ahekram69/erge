@@ -1,0 +1,6 @@
+<RCC>
+  <qresource prefix="/icons">
+    <file alias="spin-up.svg">assets/spin-up.svg</file>
+    <file alias="spin-down.svg">assets/spin-down.svg</file>
+  </qresource>
+</RCC>
