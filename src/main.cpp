@@ -60,14 +60,39 @@ int main(int argc, char *argv[])
         }
         QTabBar::tab:selected { background: #ffffff; color: #0071e3; }
         QTabBar::tab:hover:!selected { background: #dedee3; color: #1d1d1f; }
-        QComboBox, QPushButton, QSpinBox {
+        QComboBox, QPushButton {
             min-height: 34px;
             background: #ffffff;
             border: 1px solid #d2d2d7;
             border-radius: 8px;
             padding: 0 10px;
         }
-        QComboBox:hover, QPushButton:hover, QSpinBox:hover { border-color: #0071e3; background: #f7f9fc; }
+        QComboBox:hover, QPushButton:hover { border-color: #0071e3; background: #f7f9fc; }
+        QSpinBox {
+            min-height: 34px;
+            background: #ffffff;
+            border: 1px solid #d2d2d7;
+            border-radius: 8px;
+            padding: 0 25px 0 9px;
+        }
+        QSpinBox:hover { border-color: #0071e3; }
+        QSpinBox::up-button, QSpinBox::down-button {
+            subcontrol-origin: border;
+            width: 22px;
+            background: #f5f5f7;
+            border-left: 1px solid #d2d2d7;
+        }
+        QSpinBox::up-button {
+            subcontrol-position: top right;
+            border-bottom: 1px solid #d2d2d7;
+            border-top-right-radius: 8px;
+        }
+        QSpinBox::down-button {
+            subcontrol-position: bottom right;
+            border-bottom-right-radius: 8px;
+        }
+        QSpinBox::up-button:hover, QSpinBox::down-button:hover { background: #e8e8ed; }
+        QSpinBox::up-arrow, QSpinBox::down-arrow { width: 8px; height: 8px; }
         QPushButton:pressed { background: #ececf1; }
         QPushButton#primaryButton { background: #0071e3; border-color: #0071e3; color: white; font-weight: 700; }
         QPushButton#primaryButton:hover { background: #0077ed; }
