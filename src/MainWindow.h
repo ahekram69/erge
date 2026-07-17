@@ -8,6 +8,7 @@
 #include <memory>
 
 class QCamera;
+class QCheckBox;
 class QComboBox;
 class QLabel;
 class QPushButton;
@@ -46,6 +47,7 @@ private:
     void saveNativePreset();
     void loadNativePreset();
     void resetNativeControls();
+    void setConnectionBadge(const QString &text, const QString &state);
     QString presetGroup() const;
     void syncControls();
     QString formatLabel(const QCameraFormat &format) const;
@@ -63,6 +65,10 @@ private:
     QPushButton *m_snapshotButton = nullptr;
     QPushButton *m_recordButton = nullptr;
     QLabel *m_statusLabel = nullptr;
+    QLabel *m_connectionBadge = nullptr;
+    QCheckBox *m_mirrorCheck = nullptr;
+    QCheckBox *m_verticalCheck = nullptr;
+    QComboBox *m_rotationCombo = nullptr;
     QSlider *m_exposureSlider = nullptr;
     QLabel *m_exposureValue = nullptr;
     QSlider *m_zoomSlider = nullptr;

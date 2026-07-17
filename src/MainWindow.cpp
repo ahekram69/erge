@@ -22,6 +22,7 @@
 #include <QSlider>
 #include <QStatusBar>
 #include <QStandardPaths>
+#include <QStyle>
 #include <QTimer>
 #include <QVBoxLayout>
 #include <QVideoFrame>
@@ -102,9 +103,34 @@ void MainWindow::buildUi()
         new QLabel(tr("版本 v%1 · %2").arg(QStringLiteral(APP_VERSION), buildId), this));
 
     auto *central = new QWidget(this);
-    auto *root = new QHBoxLayout(central);
-    root->setContentsMargins(12, 12, 12, 12);
-    root->setSpacing(12);
+    central->setObjectName(QStringLiteral("appRoot"));
+    auto *root = new QVBoxLayout(central);
+    root->setContentsMargins(18, 14, 18, 16);
+    root->setSpacing(14);
+
+    auto *header = new QFrame(central);
+    header->setObjectName(QStringLiteral("headerBar"));
+    auto *headerLayout = new QHBoxLayout(header);
+    headerLayout->setContentsMargins(18, 12, 18, 12);
+    auto *headingColumn = new QVBoxLayout;
+    headingColumn->setSpacing(2);
+    auto *appTitle = new QLabel(tr("USB Camera Control"), header);
+    appTitle->setObjectName(QStringLiteral("appTitle"));
+    auto *appSubtitle = new QLabel(tr("专业 USB 摄像头预览与参数控制"), header);
+    appSubtitle->setObjectName(QStringLiteral("appSubtitle"));
+    headingColumn->addWidget(appTitle);
+    headingColumn->addWidget(appSubtitle);
+    headerLayout->addLayout(headingColumn);
+    headerLayout->addStretch();
+    m_connectionBadge = new QLabel(tr("●  正在连接"), header);
+    m_connectionBadge->setObjectName(QStringLiteral("connectionBadge"));
+    m_connectionBadge->setProperty("state", QStringLiteral("waiting"));
+    headerLayout->addWidget(m_connectionBadge);
+    root->addWidget(header);
+
+    auto *content = new QHBoxLayout;
+    content->setSpacing(14);
+    root->addLayout(content, 1);
 
     m_videoWidget = new VideoPreviewWidget(central);
     connect(m_videoWidget->videoSink(), &QVideoSink::videoFrameChanged,
@@ -113,12 +139,13 @@ void MainWindow::buildUi()
                     return;
                 if (!m_receivedFrame) {
                     m_receivedFrame = true;
+                    setConnectionBadge(tr("●  预览正常"), QStringLiteral("ready"));
                     m_statusLabel->setText(tr("预览正常：%1 × %2")
                                                .arg(frame.width())
                                                .arg(frame.height()));
                 }
             });
-    root->addWidget(m_videoWidget, 1);
+    content->addWidget(m_videoWidget, 1);
 
     auto *panel = new QFrame(central);
     panel->setMinimumWidth(320);
@@ -130,6 +157,7 @@ void MainWindow::buildUi()
     m_deviceCombo = new QComboBox(deviceGroup);
     m_formatCombo = new QComboBox(deviceGroup);
     m_startButton = new QPushButton(tr("启动预览"), deviceGroup);
+    m_startButton->setObjectName(QStringLiteral("primaryButton"));
     auto *refreshButton = new QPushButton(tr("刷新设备"), deviceGroup);
     deviceLayout->addWidget(new QLabel(tr("设备"), deviceGroup));
     deviceLayout->addWidget(m_deviceCombo);
@@ -146,21 +174,22 @@ void MainWindow::buildUi()
     auto *captureButtons = new QHBoxLayout;
     m_snapshotButton = new QPushButton(tr("截图"), captureGroup);
     m_recordButton = new QPushButton(tr("开始录像"), captureGroup);
+    m_recordButton->setObjectName(QStringLiteral("recordButton"));
     captureButtons->addWidget(m_snapshotButton);
     captureButtons->addWidget(m_recordButton);
     captureLayout->addLayout(captureButtons);
 
-    auto *mirrorCheck = new QCheckBox(tr("左右镜像"), captureGroup);
-    auto *verticalCheck = new QCheckBox(tr("上下翻转"), captureGroup);
-    auto *rotationCombo = new QComboBox(captureGroup);
-    rotationCombo->addItem(tr("不旋转"), 0);
-    rotationCombo->addItem(tr("顺时针 90°"), 90);
-    rotationCombo->addItem(tr("旋转 180°"), 180);
-    rotationCombo->addItem(tr("顺时针 270°"), 270);
-    captureLayout->addWidget(mirrorCheck);
-    captureLayout->addWidget(verticalCheck);
+    m_mirrorCheck = new QCheckBox(tr("左右镜像"), captureGroup);
+    m_verticalCheck = new QCheckBox(tr("上下翻转"), captureGroup);
+    m_rotationCombo = new QComboBox(captureGroup);
+    m_rotationCombo->addItem(tr("不旋转"), 0);
+    m_rotationCombo->addItem(tr("顺时针 90°"), 90);
+    m_rotationCombo->addItem(tr("旋转 180°"), 180);
+    m_rotationCombo->addItem(tr("顺时针 270°"), 270);
+    captureLayout->addWidget(m_mirrorCheck);
+    captureLayout->addWidget(m_verticalCheck);
     captureLayout->addWidget(new QLabel(tr("画面旋转"), captureGroup));
-    captureLayout->addWidget(rotationCombo);
+    captureLayout->addWidget(m_rotationCombo);
     panelLayout->addWidget(captureGroup);
 
     auto *imageGroup = new QGroupBox(tr("画面参数"), panel);
@@ -189,6 +218,7 @@ void MainWindow::buildUi()
     panelLayout->addStretch();
 
     m_statusLabel = new QLabel(tr("正在查找摄像头…"), panel);
+    m_statusLabel->setObjectName(QStringLiteral("statusCard"));
     m_statusLabel->setWordWrap(true);
     panelLayout->addWidget(m_statusLabel);
     auto *scrollArea = new QScrollArea(central);
@@ -198,7 +228,7 @@ void MainWindow::buildUi()
     scrollArea->setMinimumWidth(340);
     scrollArea->setMaximumWidth(410);
     scrollArea->setWidget(panel);
-    root->addWidget(scrollArea);
+    content->addWidget(scrollArea);
     setCentralWidget(central);
 
     connect(refreshButton, &QPushButton::clicked, this, &MainWindow::refreshDevices);
@@ -207,17 +237,32 @@ void MainWindow::buildUi()
     connect(m_startButton, &QPushButton::clicked, this, &MainWindow::toggleCamera);
     connect(m_snapshotButton, &QPushButton::clicked, this, &MainWindow::takeSnapshot);
     connect(m_recordButton, &QPushButton::clicked, this, &MainWindow::toggleRecording);
-    connect(mirrorCheck, &QCheckBox::toggled, m_videoWidget, &VideoPreviewWidget::setMirrored);
-    connect(verticalCheck, &QCheckBox::toggled, m_videoWidget,
-            &VideoPreviewWidget::setFlippedVertically);
-    connect(rotationCombo, &QComboBox::currentIndexChanged, this,
-            [this, rotationCombo](int index) {
-                m_videoWidget->setRotation(rotationCombo->itemData(index).toInt());
+    connect(m_mirrorCheck, &QCheckBox::toggled, this, [this](bool enabled) {
+        m_videoWidget->setMirrored(enabled);
+        QSettings().setValue(QStringLiteral("preview/mirrored"), enabled);
+    });
+    connect(m_verticalCheck, &QCheckBox::toggled, this, [this](bool enabled) {
+        m_videoWidget->setFlippedVertically(enabled);
+        QSettings().setValue(QStringLiteral("preview/flippedVertically"), enabled);
+    });
+    connect(m_rotationCombo, &QComboBox::currentIndexChanged, this,
+            [this](int index) {
+                const int rotation = m_rotationCombo->itemData(index).toInt();
+                m_videoWidget->setRotation(rotation);
+                QSettings().setValue(QStringLiteral("preview/rotation"), rotation);
             });
     connect(m_recorder.get(), &QMediaRecorder::recorderStateChanged,
             this, &MainWindow::updateRecorderState);
     connect(m_recorder.get(), &QMediaRecorder::errorOccurred,
             this, &MainWindow::showRecorderError);
+
+    QSettings settings;
+    m_mirrorCheck->setChecked(settings.value(QStringLiteral("preview/mirrored"), false).toBool());
+    m_verticalCheck->setChecked(
+        settings.value(QStringLiteral("preview/flippedVertically"), false).toBool());
+    const int savedRotation = settings.value(QStringLiteral("preview/rotation"), 0).toInt();
+    const int rotationIndex = m_rotationCombo->findData(savedRotation);
+    m_rotationCombo->setCurrentIndex(rotationIndex >= 0 ? rotationIndex : 0);
 
     connect(m_exposureSlider, &QSlider::valueChanged, this, [this](int value) {
         if (!m_camera)
@@ -238,7 +283,9 @@ void MainWindow::buildUi()
 void MainWindow::refreshDevices()
 {
     const auto devices = QMediaDevices::videoInputs();
-    const QByteArray previousId = m_deviceCombo->currentData().toByteArray();
+    QByteArray previousId = m_deviceCombo->currentData().toByteArray();
+    if (previousId.isEmpty())
+        previousId = QSettings().value(QStringLiteral("device/lastId")).toByteArray();
     m_deviceCombo->blockSignals(true);
     m_deviceCombo->clear();
 
@@ -258,6 +305,7 @@ void MainWindow::refreshDevices()
         m_camera.reset();
         m_formatCombo->clear();
         m_statusLabel->setText(tr("未检测到摄像头，请连接 USB 摄像头后刷新。"));
+        setConnectionBadge(tr("●  未连接"), QStringLiteral("error"));
         syncControls();
         return;
     }
@@ -271,6 +319,7 @@ void MainWindow::selectCamera(int index)
     const auto devices = QMediaDevices::videoInputs();
     if (index < 0 || index >= devices.size())
         return;
+    QSettings().setValue(QStringLiteral("device/lastId"), devices.at(index).id());
     openCamera(devices.at(index));
 }
 
@@ -281,6 +330,7 @@ void MainWindow::openCamera(const QCameraDevice &device)
 
     m_camera = std::make_unique<QCamera>(device);
     m_currentDeviceName = device.description();
+    setConnectionBadge(tr("●  正在启动"), QStringLiteral("waiting"));
     m_receivedFrame = false;
     m_captureSession.setCamera(m_camera.get());
     m_captureSession.setVideoSink(m_videoWidget->videoSink());
@@ -502,6 +552,8 @@ void MainWindow::updateCameraState()
     if (!m_camera)
         return;
     m_startButton->setText(m_camera->isActive() ? tr("停止预览") : tr("启动预览"));
+    if (!m_camera->isActive())
+        setConnectionBadge(tr("●  已停止"), QStringLiteral("waiting"));
     m_statusLabel->setText(m_camera->isActive() ? tr("摄像头正在运行") : tr("摄像头已停止"));
 }
 
@@ -509,7 +561,18 @@ void MainWindow::showCameraError()
 {
     if (!m_camera || m_camera->error() == QCamera::NoError)
         return;
+    setConnectionBadge(tr("●  摄像头错误"), QStringLiteral("error"));
     m_statusLabel->setText(tr("摄像头错误：%1").arg(m_camera->errorString()));
+}
+
+void MainWindow::setConnectionBadge(const QString &text, const QString &state)
+{
+    if (!m_connectionBadge)
+        return;
+    m_connectionBadge->setText(text);
+    m_connectionBadge->setProperty("state", state);
+    m_connectionBadge->style()->unpolish(m_connectionBadge);
+    m_connectionBadge->style()->polish(m_connectionBadge);
 }
 
 void MainWindow::takeSnapshot()
@@ -567,6 +630,9 @@ void MainWindow::updateRecorderState()
 {
     const bool recording = m_recorder->recorderState() == QMediaRecorder::RecordingState;
     m_recordButton->setText(recording ? tr("停止录像") : tr("开始录像"));
+    m_recordButton->setProperty("recording", recording);
+    m_recordButton->style()->unpolish(m_recordButton);
+    m_recordButton->style()->polish(m_recordButton);
     if (recording) {
         m_statusLabel->setText(tr("正在录像…"));
     } else if (!m_recorder->actualLocation().isEmpty()) {
