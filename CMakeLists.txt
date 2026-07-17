@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.21)
 
-project(UsbCameraControl VERSION 0.6.3 LANGUAGES CXX)
+project(UsbCameraControl VERSION 0.7.0 LANGUAGES CXX)
 
 set(APP_BUILD_ID "local" CACHE STRING "Build identifier shown in the application")
 
@@ -37,9 +37,17 @@ else()
     target_sources(UsbCameraControl PRIVATE
         src/NativeCameraControls_stub.cpp
         assets/app-icon.icns
+        macos/en.lproj/InfoPlist.strings
+        macos/zh-Hans.lproj/InfoPlist.strings
     )
     set_source_files_properties(assets/app-icon.icns PROPERTIES
         MACOSX_PACKAGE_LOCATION "Resources"
+    )
+    set_source_files_properties(macos/en.lproj/InfoPlist.strings PROPERTIES
+        MACOSX_PACKAGE_LOCATION "Resources/en.lproj"
+    )
+    set_source_files_properties(macos/zh-Hans.lproj/InfoPlist.strings PROPERTIES
+        MACOSX_PACKAGE_LOCATION "Resources/zh-Hans.lproj"
     )
 endif()
 
@@ -61,7 +69,7 @@ set_target_properties(UsbCameraControl PROPERTIES
     MACOSX_BUNDLE TRUE
     MACOSX_BUNDLE_BUNDLE_NAME "USB Camera Control"
     MACOSX_BUNDLE_ICON_FILE "app-icon.icns"
-    MACOSX_BUNDLE_GUI_IDENTIFIER "com.example.usbcameracontrol"
+    MACOSX_BUNDLE_GUI_IDENTIFIER "com.cameratools.usbcameracontrol"
     MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/macos/Info.plist.in"
 )
 

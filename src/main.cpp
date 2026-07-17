@@ -27,7 +27,7 @@ int main(int argc, char *argv[])
         && translator.load(QStringLiteral(":/i18n/usb_camera_control_en.qm")))
         app.installTranslator(&translator);
     app.setStyle(QStyleFactory::create(QStringLiteral("Fusion")));
-    app.setWindowIcon(QIcon(QStringLiteral(":/icons/app-icon.svg")));
+    app.setWindowIcon(QIcon(QStringLiteral(":/icons/app-icon.png")));
     app.setStyleSheet(QStringLiteral(R"(
         * {
             font-family: "Segoe UI", "Microsoft YaHei UI", "PingFang SC";

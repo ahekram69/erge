@@ -1,6 +1,7 @@
 <RCC>
   <qresource prefix="/icons">
     <file alias="app-icon.svg">assets/app-icon.svg</file>
+    <file alias="app-icon.png">assets/app-icon-256.png</file>
     <file alias="spin-up.svg">assets/spin-up.svg</file>
     <file alias="spin-down.svg">assets/spin-down.svg</file>
   </qresource>

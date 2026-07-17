@@ -3,7 +3,7 @@
 Windows 优先、macOS 次优先的 USB 摄像头预览与参数控制软件。
 
 每次推送代码后，GitHub Actions 会自动生成带版本号和构建编号的 Windows
-测试包。在仓库的 **Actions → Windows Build** 页面下载后只需解压一次。
+安装包、Windows 免安装包和 macOS DMG 测试包。
 软件窗口标题和 EXE 文件名也会显示版本号，便于区分新旧版本。
 
 ## 当前原型
@@ -28,6 +28,12 @@ Windows 优先、macOS 次优先的 USB 摄像头预览与参数控制软件。
 cmake -S . -B build -G Ninja -DCMAKE_PREFIX_PATH=C:\Qt\6.8.0\msvc2022_64
 cmake --build build
 ```
+
+## macOS 测试版
+
+在仓库的 **Actions → macOS Build** 页面下载 DMG。当前测试版采用临时签名，
+首次打开时如果 macOS 阻止运行，请在“系统设置 → 隐私与安全性”中选择“仍要打开”。
+正式对外发布前需要使用 Apple Developer ID 完成签名与公证。
 
 ## 计划
 

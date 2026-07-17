@@ -3,7 +3,12 @@
 <plist version="1.0">
 <dict>
     <key>CFBundleDevelopmentRegion</key>
-    <string>zh_CN</string>
+    <string>en</string>
+    <key>CFBundleLocalizations</key>
+    <array>
+        <string>en</string>
+        <string>zh-Hans</string>
+    </array>
     <key>CFBundleDisplayName</key>
     <string>USB Camera Control</string>
     <key>CFBundleExecutable</key>
@@ -21,7 +26,9 @@
     <key>CFBundleVersion</key>
     <string>${PROJECT_VERSION}</string>
     <key>NSCameraUsageDescription</key>
-    <string>用于显示 USB 摄像头画面并调整摄像头参数。</string>
+    <string>USB Camera Control needs camera access to display live video, take snapshots, and record video.</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>12.0</string>
     <key>NSHighResolutionCapable</key>
     <true/>
 </dict>
