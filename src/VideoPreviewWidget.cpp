@@ -33,8 +33,13 @@ VideoPreviewWidget::VideoPreviewWidget(QWidget *parent)
 
     connect(m_videoItem->videoSink(), &QVideoSink::videoFrameChanged,
             this, [this](const QVideoFrame &frame) {
-                if (frame.isValid())
+                if (frame.isValid()) {
                     m_lastFrame = frame;
+                    m_videoItem->setSize(frame.size());
+                    fitVideo();
+                } else {
+                    m_lastFrame = {};
+                }
             });
     connect(m_videoItem, &QGraphicsVideoItem::nativeSizeChanged,
             this, [this](const QSizeF &) { fitVideo(); });
@@ -56,6 +61,14 @@ QImage VideoPreviewWidget::currentImage() const
                     m_flippedVertically ? -1.0 : 1.0);
     transform.rotate(m_rotation);
     return image.transformed(transform, Qt::SmoothTransformation);
+}
+
+void VideoPreviewWidget::clearFrame()
+{
+    m_lastFrame = {};
+    m_videoItem->videoSink()->setVideoFrame({});
+    m_scene->setSceneRect({});
+    m_view->viewport()->update();
 }
 
 void VideoPreviewWidget::setMirrored(bool mirrored)

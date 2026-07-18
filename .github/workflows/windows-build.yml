@@ -1,7 +1,7 @@
 name: Windows Build
 
 env:
-  APP_VERSION: "0.9.1"
+  APP_VERSION: "0.9.3"
 
 on:
   workflow_dispatch:
@@ -41,10 +41,22 @@ jobs:
           Copy-Item "build/Release/$exeName" package/
           windeployqt --release --no-translations --compiler-runtime "package/$exeName"
 
+          $requiredRuntime = @("VCRUNTIME140.dll", "VCRUNTIME140_1.dll", "MSVCP140.dll")
+          foreach ($runtime in $requiredRuntime) {
+            if (-not (Test-Path "package/$runtime")) {
+              throw "Windows package is incomplete: $runtime was not deployed"
+            }
+          }
+
+      - name: Download Microsoft VC++ runtime for installer
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri "https://aka.ms/vs/17/release/vc_redist.x64.exe" -OutFile "package/VC_redist.x64.exe"
+
       - name: Upload Windows test build
         uses: actions/upload-artifact@v4
         with:
-          name: UsbCameraControl-Windows-v${{ env.APP_VERSION }}-build-${{ github.run_number }}
+          name: USB-Camera-Control-Portable-v${{ env.APP_VERSION }}-Windows10-x64-build-${{ github.run_number }}
           path: package/
           if-no-files-found: error
           retention-days: 14
@@ -63,7 +75,7 @@ jobs:
       - name: Upload Windows installer
         uses: actions/upload-artifact@v4
         with:
-          name: USB-Camera-Control-Setup-v${{ env.APP_VERSION }}-build-${{ github.run_number }}
+          name: USB-Camera-Control-Setup-v${{ env.APP_VERSION }}-Windows10-x64-build-${{ github.run_number }}
           path: installer-output/*.exe
           if-no-files-found: error
           retention-days: 14

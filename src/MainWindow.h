@@ -46,6 +46,12 @@ private:
     void buildUi();
     void requestCameraPermission();
     void openCamera(const QCameraDevice &device);
+    void createCameraSession(const QCameraDevice &device, quint64 generation,
+                             bool useStableFormat = false);
+    void releaseCameraSession();
+    void checkForFirstFrame(quint64 generation);
+    void retryCameraStream(quint64 generation);
+    QCameraFormat stableCameraFormat(const QCameraDevice &device) const;
     void populateFormats(const QCameraDevice &device);
     void rebuildNativeControls();
     void saveNativePreset();
@@ -84,7 +90,10 @@ private:
     QLabel *m_zoomValue = nullptr;
     QVBoxLayout *m_nativeControlsLayout = nullptr;
     QString m_currentDeviceName;
+    QByteArray m_currentDeviceId;
+    QByteArray m_preferredDeviceId;
     bool m_receivedFrame = false;
     bool m_previewRequested = true;
+    int m_streamRetryCount = 0;
     quint64 m_cameraGeneration = 0;
 };

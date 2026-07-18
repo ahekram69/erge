@@ -17,6 +17,7 @@ public:
 
     QVideoSink *videoSink() const;
     QImage currentImage() const;
+    void clearFrame();
 
     void setMirrored(bool mirrored);
     void setFlippedVertically(bool flipped);

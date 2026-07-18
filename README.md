@@ -6,6 +6,15 @@ Windows 优先、macOS 次优先的 USB 摄像头预览与参数控制软件。
 安装包、Windows 免安装包和 macOS DMG 测试包。
 软件窗口标题和 EXE 文件名也会显示版本号，便于区分新旧版本。
 
+## 系统要求
+
+- Windows 10 版本 1809（64 位）或更高版本；推荐 Windows 10/11。
+- macOS 由当前 Qt 6 构建支持的系统版本。
+- Windows 7 不受 Qt 6 支持，当前主版本无法在 Windows 7 上运行。若必须支持，需单独维护基于旧版 Qt 和旧摄像头接口的 Legacy 版本。
+
+Windows 用户优先下载名称包含 `Setup` 的安装包。安装包会自动部署 Microsoft Visual C++
+运行环境。名称包含 `Portable` 的免安装包必须完整解压后使用，不能只复制其中的主程序 EXE。
+
 ## 当前原型
 
 - 自动发现和热插拔刷新摄像头

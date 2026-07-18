@@ -61,6 +61,7 @@ MainWindow::MainWindow(QWidget *parent)
     m_recorder = std::make_unique<QMediaRecorder>();
     m_captureSession.setRecorder(m_recorder.get());
     buildUi();
+    m_preferredDeviceId = QSettings().value(QStringLiteral("device/lastId")).toByteArray();
     m_deviceRefreshTimer.setSingleShot(true);
     m_deviceRefreshTimer.setInterval(700);
     connect(&m_deviceRefreshTimer, &QTimer::timeout, this, &MainWindow::refreshDevices);
@@ -360,12 +361,7 @@ void MainWindow::handleDeviceChange()
         m_recorder->stop();
 
     ++m_cameraGeneration;
-    if (m_camera) {
-        m_camera->stop();
-        m_captureSession.setCamera(nullptr);
-        m_camera.reset();
-    }
-    m_receivedFrame = false;
+    releaseCameraSession();
     m_formatCombo->setEnabled(false);
     m_startButton->setEnabled(false);
     setConnectionBadge(tr("●  设备变化"), QStringLiteral("waiting"));
@@ -376,9 +372,8 @@ void MainWindow::handleDeviceChange()
 void MainWindow::refreshDevices()
 {
     const auto devices = QMediaDevices::videoInputs();
-    QByteArray previousId = m_deviceCombo->currentData().toByteArray();
-    if (previousId.isEmpty())
-        previousId = QSettings().value(QStringLiteral("device/lastId")).toByteArray();
+    if (m_preferredDeviceId.isEmpty())
+        m_preferredDeviceId = QSettings().value(QStringLiteral("device/lastId")).toByteArray();
     m_deviceCombo->blockSignals(true);
     m_deviceCombo->clear();
 
@@ -386,7 +381,8 @@ void MainWindow::refreshDevices()
     for (int i = 0; i < devices.size(); ++i) {
         const auto &device = devices.at(i);
         m_deviceCombo->addItem(device.description(), device.id());
-        if (device.id() == previousId || (previousId.isEmpty() && device.isDefault()))
+        if (device.id() == m_preferredDeviceId
+            || (m_preferredDeviceId.isEmpty() && device.isDefault()))
             selected = i;
     }
     m_deviceCombo->blockSignals(false);
@@ -396,9 +392,9 @@ void MainWindow::refreshDevices()
     m_startButton->setEnabled(found);
     if (!found) {
         ++m_cameraGeneration;
-        m_captureSession.setCamera(nullptr);
-        m_camera.reset();
+        releaseCameraSession();
         m_currentDeviceName.clear();
+        m_currentDeviceId.clear();
         m_formatCombo->clear();
         m_formatCombo->setEnabled(false);
         m_snapshotButton->setEnabled(false);
@@ -409,8 +405,9 @@ void MainWindow::refreshDevices()
         return;
     }
 
-    m_deviceCombo->setCurrentIndex(selected >= 0 ? selected : 0);
-    selectCamera(m_deviceCombo->currentIndex());
+    const int index = selected >= 0 ? selected : 0;
+    m_deviceCombo->setCurrentIndex(index);
+    openCamera(devices.at(index));
 }
 
 void MainWindow::selectCamera(int index)
@@ -418,41 +415,140 @@ void MainWindow::selectCamera(int index)
     const auto devices = QMediaDevices::videoInputs();
     if (index < 0 || index >= devices.size())
         return;
-    QSettings().setValue(QStringLiteral("device/lastId"), devices.at(index).id());
+    m_preferredDeviceId = devices.at(index).id();
+    QSettings().setValue(QStringLiteral("device/lastId"), m_preferredDeviceId);
     openCamera(devices.at(index));
 }
 
 void MainWindow::openCamera(const QCameraDevice &device)
 {
     const quint64 generation = ++m_cameraGeneration;
-    if (m_camera)
+    releaseCameraSession();
+    m_currentDeviceName = device.description();
+    m_currentDeviceId = device.id();
+    m_streamRetryCount = 0;
+    setConnectionBadge(tr("●  正在启动"), QStringLiteral("waiting"));
+    m_statusLabel->setText(tr("正在准备：%1").arg(device.description()));
+
+    // macOS needs a short interval after a USB hot-plug or camera switch to
+    // retire the previous CMIO stream index before a new session is created.
+    QTimer::singleShot(500, this, [this, device, generation] {
+        createCameraSession(device, generation);
+    });
+}
+
+void MainWindow::releaseCameraSession()
+{
+    if (m_camera) {
+        disconnect(m_camera.get(), nullptr, this, nullptr);
         m_camera->stop();
+    }
+    m_captureSession.setCamera(nullptr);
+    m_captureSession.setVideoSink(nullptr);
+    m_camera.reset();
+    m_receivedFrame = false;
+    if (m_videoWidget)
+        m_videoWidget->clearFrame();
+}
+
+void MainWindow::createCameraSession(const QCameraDevice &device, quint64 generation,
+                                     bool useStableFormat)
+{
+    if (generation != m_cameraGeneration)
+        return;
 
     m_camera = std::make_unique<QCamera>(device);
-    m_currentDeviceName = device.description();
-    setConnectionBadge(tr("●  正在启动"), QStringLiteral("waiting"));
-    m_receivedFrame = false;
     m_captureSession.setCamera(m_camera.get());
     m_captureSession.setVideoSink(m_videoWidget->videoSink());
     connect(m_camera.get(), &QCamera::activeChanged, this, &MainWindow::updateCameraState);
     connect(m_camera.get(), &QCamera::errorOccurred, this, &MainWindow::showCameraError);
 
     populateFormats(device);
+    if (useStableFormat) {
+        const QCameraFormat format = stableCameraFormat(device);
+        if (!format.isNull()) {
+            m_camera->setCameraFormat(format);
+            const int index = m_formatCombo->findData(QVariant::fromValue(format));
+            if (index >= 0)
+                m_formatCombo->setCurrentIndex(index);
+        }
+    }
     if (m_nativeControls) {
         m_nativeControls->open(device.description());
         rebuildNativeControls();
     }
     syncControls();
-    m_statusLabel->setText(tr("已选择：%1").arg(device.description()));
     m_formatCombo->setEnabled(true);
     m_snapshotButton->setEnabled(true);
     m_recordButton->setEnabled(true);
+    m_receivedFrame = false;
+    setConnectionBadge(tr("●  正在启动"), QStringLiteral("waiting"));
+    m_statusLabel->setText(useStableFormat
+        ? tr("正在使用兼容格式重试：%1").arg(device.description())
+        : tr("正在启动：%1").arg(device.description()));
     if (m_previewRequested)
         m_camera->start();
-    QTimer::singleShot(3000, this, [this, generation] {
-        if (generation == m_cameraGeneration && m_camera
-            && m_camera->isActive() && !m_receivedFrame)
-            m_statusLabel->setText(tr("摄像头已启动，但尚未收到画面。请使用“自动（推荐）”格式。"));
+    checkForFirstFrame(generation);
+}
+
+void MainWindow::checkForFirstFrame(quint64 generation)
+{
+    QTimer::singleShot(3500, this, [this, generation] {
+        if (generation != m_cameraGeneration || !m_camera || !m_previewRequested
+            || m_receivedFrame)
+            return;
+        retryCameraStream(generation);
+    });
+}
+
+void MainWindow::retryCameraStream(quint64 generation)
+{
+    if (generation != m_cameraGeneration || m_currentDeviceId.isEmpty())
+        return;
+
+    const auto devices = QMediaDevices::videoInputs();
+    const auto found = std::find_if(devices.cbegin(), devices.cend(), [this](const QCameraDevice &item) {
+        return item.id() == m_currentDeviceId;
+    });
+    if (found == devices.cend()) {
+        m_statusLabel->setText(tr("USB 摄像头已断开，等待重新连接…"));
+        setConnectionBadge(tr("●  等待重连"), QStringLiteral("waiting"));
+        return;
+    }
+
+    if (m_streamRetryCount >= 2) {
+        m_statusLabel->setText(tr("USB 摄像头没有返回画面，请重新插拔后再试。"));
+        setConnectionBadge(tr("●  无视频画面"), QStringLiteral("error"));
+        return;
+    }
+
+    ++m_streamRetryCount;
+    const bool useStableFormat = m_streamRetryCount >= 2;
+    setConnectionBadge(tr("●  正在重试"), QStringLiteral("waiting"));
+    m_statusLabel->setText(tr("尚未收到画面，正在重新建立摄像头连接（%1/2）…")
+                               .arg(m_streamRetryCount));
+    releaseCameraSession();
+    QTimer::singleShot(800, this, [this, device = *found, generation, useStableFormat] {
+        createCameraSession(device, generation, useStableFormat);
+    });
+}
+
+QCameraFormat MainWindow::stableCameraFormat(const QCameraDevice &device) const
+{
+    const auto formats = device.videoFormats();
+    if (formats.isEmpty())
+        return {};
+
+    const auto score = [](const QCameraFormat &format) {
+        const QSize resolution = format.resolution();
+        const int pixelDifference = std::abs(resolution.width() * resolution.height()
+                                             - 1920 * 1080);
+        const int highFrameRatePenalty = format.maxFrameRate() > 30.5f ? 100000000 : 0;
+        return highFrameRatePenalty + pixelDifference;
+    };
+    return *std::min_element(formats.cbegin(), formats.cend(),
+                             [&score](const QCameraFormat &left, const QCameraFormat &right) {
+        return score(left) < score(right);
     });
 }
 
@@ -742,8 +838,12 @@ void MainWindow::updateCameraState()
     if (!m_camera)
         return;
     m_startButton->setText(m_camera->isActive() ? tr("停止预览") : tr("启动预览"));
-    if (!m_camera->isActive())
+    if (m_camera->isActive()) {
+        if (!m_receivedFrame)
+            setConnectionBadge(tr("●  等待画面"), QStringLiteral("waiting"));
+    } else {
         setConnectionBadge(tr("●  已停止"), QStringLiteral("waiting"));
+    }
     m_statusLabel->setText(m_camera->isActive() ? tr("摄像头正在运行") : tr("摄像头已停止"));
 }
 
