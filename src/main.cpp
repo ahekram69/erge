@@ -65,6 +65,10 @@ int main(int argc, char *argv[])
         }
         QGroupBox::title { subcontrol-origin: margin; left: 12px; padding: 0 5px; }
         QTabWidget#controlTabs::pane { border: none; background: transparent; }
+        QTabWidget#parameterTabs::pane { border: none; background: transparent; }
+        QTabWidget#parameterTabs QTabBar::tab {
+            min-width: 0px; padding: 7px 9px; font-size: 12px;
+        }
         QTabBar::tab {
             min-width: 112px;
             padding: 9px 14px;

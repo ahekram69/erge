@@ -22,6 +22,7 @@
 #include <QMediaRecorder>
 #include <QPushButton>
 #include <QScrollArea>
+#include <QShortcut>
 #include <QSettings>
 #include <QSignalBlocker>
 #include <QSlider>
@@ -169,7 +170,16 @@ void MainWindow::buildUi()
                                                .arg(frame.height()));
                 }
             });
-    content->addWidget(m_videoWidget, 1);
+    auto *previewLayout = new QVBoxLayout;
+    auto *previewTools = new QHBoxLayout;
+    auto *fullScreenButton = new QPushButton(tr("全屏预览"), central);
+    auto *panelButton = new QPushButton(tr("收起面板"), central);
+    previewTools->addStretch();
+    previewTools->addWidget(fullScreenButton);
+    previewTools->addWidget(panelButton);
+    previewLayout->addLayout(previewTools);
+    previewLayout->addWidget(m_videoWidget, 1);
+    content->addLayout(previewLayout, 1);
 
     auto *panel = new QFrame(central);
     panel->setObjectName(QStringLiteral("sidePanel"));
@@ -180,21 +190,49 @@ void MainWindow::buildUi()
     panelLayout->setSpacing(10);
 
     auto *deviceGroup = new QGroupBox(tr("摄像头"), panel);
-    auto *deviceLayout = new QVBoxLayout(deviceGroup);
+    auto *deviceLayout = new QGridLayout(deviceGroup);
     m_deviceCombo = new QComboBox(deviceGroup);
     m_formatCombo = new QComboBox(deviceGroup);
     m_startButton = new QPushButton(tr("启动预览"), deviceGroup);
     m_startButton->setObjectName(QStringLiteral("primaryButton"));
     auto *refreshButton = new QPushButton(tr("刷新设备"), deviceGroup);
-    deviceLayout->addWidget(new QLabel(tr("设备"), deviceGroup));
-    deviceLayout->addWidget(m_deviceCombo);
-    deviceLayout->addWidget(new QLabel(tr("分辨率与帧率"), deviceGroup));
-    deviceLayout->addWidget(m_formatCombo);
+    m_deviceCombo->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
+    m_formatCombo->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
+    deviceLayout->addWidget(new QLabel(tr("设备"), deviceGroup), 0, 0);
+    deviceLayout->addWidget(m_deviceCombo, 0, 1);
+    deviceLayout->addWidget(new QLabel(tr("画质"), deviceGroup), 1, 0);
+    m_formatCombo->setToolTip(tr("分辨率与帧率"));
+    deviceLayout->addWidget(m_formatCombo, 1, 1);
+    deviceLayout->setColumnStretch(1, 1);
     auto *buttonRow = new QHBoxLayout;
     buttonRow->addWidget(refreshButton);
     buttonRow->addWidget(m_startButton);
-    deviceLayout->addLayout(buttonRow);
+    deviceLayout->addLayout(buttonRow, 2, 0, 1, 2);
     panelLayout->addWidget(deviceGroup);
+    connect(panelButton, &QPushButton::clicked, this, [panel, panelButton, this] {
+        const bool hide = !panel->isHidden();
+        panel->setVisible(!hide);
+        panelButton->setText(hide ? tr("展开面板") : tr("收起面板"));
+    });
+    const auto toggleFullScreen = [this, header, panel, panelButton, fullScreenButton] {
+        const bool entering = !isFullScreen();
+        if (entering) {
+            panel->setProperty("visibleBeforeFullscreen", !panel->isHidden());
+            showFullScreen();
+        } else {
+            showNormal();
+        }
+        header->setVisible(!entering);
+        statusBar()->setVisible(!entering);
+        panelButton->setVisible(!entering);
+        panel->setVisible(!entering && panel->property("visibleBeforeFullscreen").toBool());
+        fullScreenButton->setText(entering ? tr("退出全屏 (Esc)") : tr("全屏预览"));
+    };
+    connect(fullScreenButton, &QPushButton::clicked, this, toggleFullScreen);
+    auto *escape = new QShortcut(QKeySequence(Qt::Key_Escape), this);
+    connect(escape, &QShortcut::activated, this, [this, toggleFullScreen] {
+        if (isFullScreen()) toggleFullScreen();
+    });
 
     auto *tabs = new QTabWidget(panel);
     tabs->setObjectName(QStringLiteral("controlTabs"));
@@ -202,7 +240,10 @@ void MainWindow::buildUi()
     auto *parameterPage = new QWidget(tabs);
     auto *parameterPageLayout = new QVBoxLayout(parameterPage);
     parameterPageLayout->setContentsMargins(0, 8, 0, 0);
-    auto *parameterScroll = new QScrollArea(parameterPage);
+    auto *parameterTabs = new QTabWidget(parameterPage);
+    parameterTabs->setObjectName(QStringLiteral("parameterTabs"));
+    parameterPageLayout->addWidget(parameterTabs, 1);
+    auto *parameterScroll = new QScrollArea(parameterTabs);
     parameterScroll->setWidgetResizable(true);
     parameterScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     parameterScroll->setFrameShape(QFrame::NoFrame);
@@ -211,12 +252,23 @@ void MainWindow::buildUi()
     auto *parameterLayout = new QVBoxLayout(parameterContent);
     parameterLayout->setContentsMargins(0, 0, 4, 0);
     parameterLayout->setSpacing(8);
+    auto *focusScroll = new QScrollArea(parameterTabs);
+    focusScroll->setWidgetResizable(true);
+    focusScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    focusScroll->setFrameShape(QFrame::NoFrame);
+    auto *focusContent = new QWidget(focusScroll);
+    focusContent->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+    auto *focusLayout = new QVBoxLayout(focusContent);
+    focusLayout->setContentsMargins(0, 0, 4, 0);
+    focusScroll->setWidget(focusContent);
+    parameterTabs->addTab(parameterScroll, tr("曝光与色彩"));
+    parameterTabs->addTab(focusScroll, tr("对焦与变焦"));
 
     auto *capturePage = new QWidget(tabs);
     auto *capturePageLayout = new QVBoxLayout(capturePage);
     capturePageLayout->setContentsMargins(0, 8, 0, 0);
 
-    auto *captureGroup = new QGroupBox(tr("拍摄与画面"), capturePage);
+    auto *captureGroup = new QGroupBox(tr("截图与录像"), capturePage);
     auto *captureLayout = new QVBoxLayout(captureGroup);
     auto *captureButtons = new QHBoxLayout;
     m_snapshotButton = new QPushButton(tr("截图"), captureGroup);
@@ -225,6 +277,18 @@ void MainWindow::buildUi()
     captureButtons->addWidget(m_snapshotButton);
     captureButtons->addWidget(m_recordButton);
     captureLayout->addLayout(captureButtons);
+    m_recordingStatus = new QLabel(tr("未在录像"), captureGroup);
+    m_recordingStatus->setObjectName(QStringLiteral("recordingStatus"));
+    captureLayout->addWidget(m_recordingStatus);
+    connect(m_recorder.get(), &QMediaRecorder::durationChanged, this, [this](qint64 duration) {
+        if (m_recorder->recorderState() != QMediaRecorder::RecordingState) return;
+        const qint64 seconds = duration / 1000;
+        const QString time = QStringLiteral("%1:%2:%3")
+            .arg(seconds / 3600, 2, 10, QLatin1Char('0'))
+            .arg((seconds / 60) % 60, 2, 10, QLatin1Char('0'))
+            .arg(seconds % 60, 2, 10, QLatin1Char('0'));
+        m_recordingStatus->setText(tr("● 正在录像 %1").arg(time));
+    });
 
     auto *folderButtons = new QHBoxLayout;
     auto *picturesFolderButton = new QPushButton(tr("图片文件夹"), captureGroup);
@@ -243,14 +307,17 @@ void MainWindow::buildUi()
     m_rotationCombo->addItem(tr("顺时针 90°"), 90);
     m_rotationCombo->addItem(tr("旋转 180°"), 180);
     m_rotationCombo->addItem(tr("顺时针 270°"), 270);
-    captureLayout->addWidget(m_mirrorCheck);
-    captureLayout->addWidget(m_verticalCheck);
-    captureLayout->addWidget(new QLabel(tr("画面旋转"), captureGroup));
-    captureLayout->addWidget(m_rotationCombo);
     capturePageLayout->addWidget(captureGroup);
+    auto *directionGroup = new QGroupBox(tr("画面方向"), capturePage);
+    auto *directionLayout = new QVBoxLayout(directionGroup);
+    directionLayout->addWidget(m_mirrorCheck);
+    directionLayout->addWidget(m_verticalCheck);
+    directionLayout->addWidget(new QLabel(tr("画面旋转"), directionGroup));
+    directionLayout->addWidget(m_rotationCombo);
+    capturePageLayout->addWidget(directionGroup);
     capturePageLayout->addStretch();
 
-    auto *imageGroup = new QGroupBox(tr("基础参数"), parameterContent);
+    auto *imageGroup = new QGroupBox(tr("曝光补偿"), parameterContent);
     auto *imageLayout = new QVBoxLayout(imageGroup);
 
     auto addSlider = [&](const QString &name, QSlider *&slider, QLabel *&value) {
@@ -265,17 +332,43 @@ void MainWindow::buildUi()
     };
 
     addSlider(tr("曝光补偿"), m_exposureSlider, m_exposureValue);
-    addSlider(tr("变焦"), m_zoomSlider, m_zoomValue);
     parameterLayout->addWidget(imageGroup);
+    auto *zoomGroup = new QGroupBox(tr("变焦"), focusContent);
+    auto *zoomLayout = new QVBoxLayout(zoomGroup);
+    m_zoomValue = new QLabel("--", zoomGroup);
+    m_zoomSlider = new QSlider(Qt::Horizontal, zoomGroup);
+    zoomLayout->addWidget(m_zoomValue);
+    zoomLayout->addWidget(m_zoomSlider);
+    focusLayout->addWidget(zoomGroup);
 
-    auto *nativeGroup = new QGroupBox(tr("摄像头参数"), parameterContent);
+    auto *nativeGroup = new QGroupBox(tr("色彩与曝光"), parameterContent);
     m_nativeControlsLayout = new QVBoxLayout(nativeGroup);
     m_nativeControlsLayout->addWidget(new QLabel(tr("选择摄像头后读取硬件参数"), nativeGroup));
     nativeGroup->setVisible(static_cast<bool>(m_nativeControls));
     parameterLayout->addWidget(nativeGroup);
     parameterLayout->addStretch();
+    auto *focusGroup = new QGroupBox(tr("镜头控制"), focusContent);
+    m_focusControlsLayout = new QVBoxLayout(focusGroup);
+    focusLayout->addWidget(focusGroup);
+    focusLayout->addStretch();
     parameterScroll->setWidget(parameterContent);
-    parameterPageLayout->addWidget(parameterScroll);
+    m_parameterActions = new QWidget(parameterPage);
+    auto *actions = new QGridLayout(m_parameterActions);
+    actions->setContentsMargins(0, 4, 0, 0);
+    auto *saveButton = new QPushButton(tr("保存参数"), m_parameterActions);
+    auto *loadButton = new QPushButton(tr("应用参数"), m_parameterActions);
+    auto *resetButton = new QPushButton(tr("恢复初始设置"), m_parameterActions);
+    saveButton->setToolTip(tr("保存当前摄像头的参数"));
+    loadButton->setToolTip(tr("应用之前保存的参数"));
+    resetButton->setToolTip(tr("恢复本次打开摄像头时的参数和自动模式"));
+    actions->addWidget(saveButton, 0, 0);
+    actions->addWidget(loadButton, 0, 1);
+    actions->addWidget(resetButton, 1, 0, 1, 2);
+    parameterPageLayout->addWidget(m_parameterActions);
+    m_parameterActions->setEnabled(false);
+    connect(saveButton, &QPushButton::clicked, this, &MainWindow::saveNativePreset);
+    connect(loadButton, &QPushButton::clicked, this, &MainWindow::loadNativePreset);
+    connect(resetButton, &QPushButton::clicked, this, &MainWindow::resetNativeControls);
 
     tabs->addTab(parameterPage, tr("参数设置"));
     tabs->addTab(capturePage, tr("拍摄与画面"));
@@ -399,6 +492,9 @@ void MainWindow::refreshDevices()
         m_formatCombo->setEnabled(false);
         m_snapshotButton->setEnabled(false);
         m_recordButton->setEnabled(false);
+        m_parameterActions->setEnabled(false);
+        clearLayout(m_nativeControlsLayout);
+        clearLayout(m_focusControlsLayout);
         m_statusLabel->setText(tr("未检测到摄像头，请连接 USB 摄像头后刷新。"));
         setConnectionBadge(tr("●  未连接"), QStringLiteral("error"));
         syncControls();
@@ -558,8 +654,18 @@ void MainWindow::rebuildNativeControls()
         return;
 
     clearLayout(m_nativeControlsLayout);
+    clearLayout(m_focusControlsLayout);
 
     const auto controls = m_nativeControls->controls();
+    m_parameterActions->setEnabled(!controls.isEmpty());
+    const bool nativeZoom = std::any_of(controls.begin(), controls.end(), [](const auto &control) {
+        return control.id == NativeCameraControls::Id::Zoom;
+    });
+    m_zoomSlider->parentWidget()->setVisible(!nativeZoom);
+    auto *focusHint = new QLabel(tr("仅显示此摄像头支持的镜头参数。"), this);
+    focusHint->setWordWrap(true);
+    focusHint->setObjectName(QStringLiteral("secondaryText"));
+    m_focusControlsLayout->addWidget(focusHint);
     if (controls.isEmpty()) {
         auto *message = new QLabel(m_nativeControls->errorString(), this);
         message->setWordWrap(true);
@@ -573,25 +679,6 @@ void MainWindow::rebuildNativeControls()
     capabilityLabel->setObjectName(QStringLiteral("secondaryText"));
     capabilityLabel->setWordWrap(true);
     m_nativeControlsLayout->addWidget(capabilityLabel);
-
-    auto *buttonGrid = new QGridLayout;
-    buttonGrid->setHorizontalSpacing(8);
-    buttonGrid->setVerticalSpacing(8);
-    auto *saveButton = new QPushButton(tr("保存参数"), this);
-    auto *loadButton = new QPushButton(tr("应用参数"), this);
-    auto *resetButton = new QPushButton(tr("恢复初始设置"), this);
-    saveButton->setToolTip(tr("保存当前摄像头的参数"));
-    loadButton->setToolTip(tr("应用之前保存的参数"));
-    resetButton->setToolTip(tr("恢复本次打开摄像头时的参数和自动模式"));
-    buttonGrid->addWidget(saveButton, 0, 0);
-    buttonGrid->addWidget(loadButton, 0, 1);
-    buttonGrid->addWidget(resetButton, 1, 0, 1, 2);
-    buttonGrid->setColumnStretch(0, 1);
-    buttonGrid->setColumnStretch(1, 1);
-    m_nativeControlsLayout->addLayout(buttonGrid);
-    connect(saveButton, &QPushButton::clicked, this, &MainWindow::saveNativePreset);
-    connect(loadButton, &QPushButton::clicked, this, &MainWindow::loadNativePreset);
-    connect(resetButton, &QPushButton::clicked, this, &MainWindow::resetNativeControls);
 
     for (const auto &control : controls) {
         QString controlName = control.name;
@@ -641,6 +728,10 @@ void MainWindow::rebuildNativeControls()
         slider->setValue(static_cast<int>(control.value));
         slider->setEnabled(!control.automatic);
         valueInput->setEnabled(!control.automatic);
+        auto *automaticHint = new QLabel(tr("自动调节中，关闭自动后可手动修改"), container);
+        automaticHint->setObjectName(QStringLiteral("secondaryText"));
+        automaticHint->setWordWrap(true);
+        automaticHint->setVisible(control.automatic);
 
         connect(slider, &QSlider::valueChanged, this,
                 [this, id = control.id, valueInput, name = controlName](int value) {
@@ -661,18 +752,24 @@ void MainWindow::rebuildNativeControls()
                     }
                 });
         connect(autoBox, &QCheckBox::toggled, this,
-                [this, id = control.id, slider, valueInput, name = controlName](bool enabled) {
+                [this, id = control.id, slider, valueInput, autoBox, automaticHint, name = controlName](bool enabled) {
                     if (m_nativeControls->setAutomatic(id, enabled)) {
                         slider->setEnabled(!enabled);
                         valueInput->setEnabled(!enabled);
+                        automaticHint->setVisible(enabled);
                     } else {
+                        const QSignalBlocker blocker(autoBox);
+                        autoBox->setChecked(!enabled);
                         m_statusLabel->setText(tr("%1的自动模式切换失败").arg(name));
                     }
                 });
 
         layout->addLayout(titleRow);
         layout->addWidget(slider);
-        m_nativeControlsLayout->addWidget(container);
+        layout->addWidget(automaticHint);
+        const bool lens = control.id == NativeCameraControls::Id::Focus
+            || control.id == NativeCameraControls::Id::Zoom;
+        (lens ? m_focusControlsLayout : m_nativeControlsLayout)->addWidget(container);
     }
 }
 
@@ -921,6 +1018,9 @@ void MainWindow::updateRecorderState()
     const bool recording = m_recorder->recorderState() == QMediaRecorder::RecordingState;
     m_recordButton->setText(recording ? tr("停止录像") : tr("开始录像"));
     m_recordButton->setProperty("recording", recording);
+    m_recordingStatus->setText(recording ? tr("● 正在录像 %1").arg(QStringLiteral("00:00:00"))
+                                         : tr("未在录像"));
+    m_recordingStatus->setStyleSheet(recording ? QStringLiteral("color: #c93442; font-weight: 600;") : QString());
     m_recordButton->style()->unpolish(m_recordButton);
     m_recordButton->style()->polish(m_recordButton);
     if (recording) {
@@ -1060,11 +1160,15 @@ void MainWindow::exportDiagnostics()
 
 void MainWindow::syncControls()
 {
+    const QSignalBlocker exposureBlocker(m_exposureSlider);
+    const QSignalBlocker zoomBlocker(m_zoomSlider);
     const bool available = static_cast<bool>(m_camera);
     m_exposureSlider->setEnabled(false);
     m_zoomSlider->setEnabled(false);
     m_exposureValue->setText("--");
     m_zoomValue->setText("--");
+    m_exposureSlider->parentWidget()->setVisible(false);
+    m_zoomSlider->parentWidget()->setVisible(false);
     if (!available)
         return;
 
@@ -1074,12 +1178,19 @@ void MainWindow::syncControls()
         m_exposureSlider->setRange(-4 * SliderScale, 4 * SliderScale);
         m_exposureSlider->setValue(qRound(m_camera->exposureCompensation() * SliderScale));
         m_exposureSlider->setEnabled(true);
+        m_exposureSlider->parentWidget()->setVisible(true);
         m_exposureValue->setText(QString::number(m_camera->exposureCompensation(), 'f', 1));
     }
 
     const float minZoom = m_camera->minimumZoomFactor();
     const float maxZoom = m_camera->maximumZoomFactor();
     if (maxZoom > minZoom) {
+        const auto controls = m_nativeControls ? m_nativeControls->controls()
+                                               : QList<NativeCameraControls::Control>{};
+        const bool nativeZoom = std::any_of(controls.begin(), controls.end(), [](const auto &control) {
+            return control.id == NativeCameraControls::Id::Zoom;
+        });
+        m_zoomSlider->parentWidget()->setVisible(!nativeZoom);
         m_zoomSlider->setRange(qRound(minZoom * SliderScale), qRound(maxZoom * SliderScale));
         m_zoomSlider->setValue(qRound(m_camera->zoomFactor() * SliderScale));
         m_zoomSlider->setEnabled(true);

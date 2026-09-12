@@ -529,5 +529,20 @@
         <source>诊断信息已保存：%1</source>
         <translation>Diagnostics saved: %1</translation>
     </message>
+    <message><source>全屏预览</source><translation>Full screen</translation></message>
+    <message><source>收起面板</source><translation>Hide controls</translation></message>
+    <message><source>展开面板</source><translation>Show controls</translation></message>
+    <message><source>画质</source><translation>Format</translation></message>
+    <message><source>退出全屏 (Esc)</source><translation>Exit full screen (Esc)</translation></message>
+    <message><source>曝光与色彩</source><translation>Exposure &amp; color</translation></message>
+    <message><source>对焦与变焦</source><translation>Focus &amp; zoom</translation></message>
+    <message><source>截图与录像</source><translation>Photo &amp; video</translation></message>
+    <message><source>未在录像</source><translation>Not recording</translation></message>
+    <message><source>● 正在录像 %1</source><translation>● Recording %1</translation></message>
+    <message><source>画面方向</source><translation>Orientation</translation></message>
+    <message><source>色彩与曝光</source><translation>Color &amp; exposure</translation></message>
+    <message><source>镜头控制</source><translation>Lens controls</translation></message>
+    <message><source>仅显示此摄像头支持的镜头参数。</source><translation>Only lens controls supported by this camera are shown.</translation></message>
+    <message><source>自动调节中，关闭自动后可手动修改</source><translation>Adjusting automatically. Turn off Auto to adjust manually.</translation></message>
 </context>
 </TS>

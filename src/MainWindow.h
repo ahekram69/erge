@@ -89,6 +89,9 @@ private:
     QSlider *m_zoomSlider = nullptr;
     QLabel *m_zoomValue = nullptr;
     QVBoxLayout *m_nativeControlsLayout = nullptr;
+    QVBoxLayout *m_focusControlsLayout = nullptr;
+    QWidget *m_parameterActions = nullptr;
+    QLabel *m_recordingStatus = nullptr;
     QString m_currentDeviceName;
     QByteArray m_currentDeviceId;
     QByteArray m_preferredDeviceId;
