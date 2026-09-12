@@ -1,0 +1,61 @@
+name: macOS Build
+
+env:
+  APP_VERSION: "0.9.4"
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - "agent/**"
+  pull_request:
+
+jobs:
+  build-macos:
+    runs-on: macos-14
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: "6.8.3"
+          arch: clang_64
+          modules: qtmultimedia
+          cache: true
+
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DAPP_BUILD_ID=${{ github.sha }}
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: Deploy Qt runtime
+        run: macdeployqt "build/UsbCameraControl.app" -always-overwrite
+
+      - name: Ad-hoc sign test application
+        run: codesign --force --deep --sign - "build/UsbCameraControl.app"
+
+      - name: Verify application bundle
+        run: |
+          codesign --verify --deep --strict --verbose=2 "build/UsbCameraControl.app"
+          file "build/UsbCameraControl.app/Contents/MacOS/UsbCameraControl"
+          plutil -lint "build/UsbCameraControl.app/Contents/Info.plist"
+
+      - name: Create DMG
+        run: |
+          mkdir -p dmg-root output
+          ditto "build/UsbCameraControl.app" "dmg-root/USB Camera Control.app"
+          ln -s /Applications "dmg-root/Applications"
+          hdiutil create -volname "USB Camera Control" -srcfolder dmg-root -ov -format UDZO "output/USB-Camera-Control-v${APP_VERSION}-macOS.dmg"
+
+      - name: Upload macOS DMG
+        uses: actions/upload-artifact@v4
+        with:
+          name: USB-Camera-Control-macOS-v${{ env.APP_VERSION }}-build-${{ github.run_number }}
+          path: output/*.dmg
+          if-no-files-found: error
+          retention-days: 14

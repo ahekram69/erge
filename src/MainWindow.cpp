@@ -1,0 +1,1199 @@
+#include "MainWindow.h"
+#include "NativeCameraControls.h"
+#include "VideoPreviewWidget.h"
+
+#include <QApplication>
+#include <QCamera>
+#include <QCameraFormat>
+#include <QCheckBox>
+#include <QPermissions>
+#include <QComboBox>
+#include <QDateTime>
+#include <QDesktopServices>
+#include <QDir>
+#include <QFile>
+#include <QFileDialog>
+#include <QFrame>
+#include <QGroupBox>
+#include <QGridLayout>
+#include <QHBoxLayout>
+#include <QLabel>
+#include <QMessageBox>
+#include <QMediaRecorder>
+#include <QPushButton>
+#include <QScrollArea>
+#include <QShortcut>
+#include <QSettings>
+#include <QSignalBlocker>
+#include <QSlider>
+#include <QSpinBox>
+#include <QStatusBar>
+#include <QStandardPaths>
+#include <QStyle>
+#include <QSysInfo>
+#include <QTabWidget>
+#include <QTimer>
+#include <QVBoxLayout>
+#include <QVideoFrame>
+#include <QVideoSink>
+#include <QUrl>
+
+#include <algorithm>
+#include <QStringList>
+
+namespace {
+constexpr int SliderScale = 100;
+
+void clearLayout(QLayout *layout)
+{
+    while (QLayoutItem *item = layout->takeAt(0)) {
+        if (QLayout *childLayout = item->layout())
+            clearLayout(childLayout);
+        delete item->widget();
+        delete item;
+    }
+}
+}
+
+MainWindow::MainWindow(QWidget *parent)
+    : QMainWindow(parent)
+{
+    m_nativeControls = createNativeCameraControls();
+    m_recorder = std::make_unique<QMediaRecorder>();
+    m_captureSession.setRecorder(m_recorder.get());
+    buildUi();
+    m_preferredDeviceId = QSettings().value(QStringLiteral("device/lastId")).toByteArray();
+    m_deviceRefreshTimer.setSingleShot(true);
+    m_deviceRefreshTimer.setInterval(700);
+    connect(&m_deviceRefreshTimer, &QTimer::timeout, this, &MainWindow::refreshDevices);
+    connect(&m_mediaDevices, &QMediaDevices::videoInputsChanged,
+            this, &MainWindow::handleDeviceChange);
+    requestCameraPermission();
+}
+
+MainWindow::~MainWindow() = default;
+
+void MainWindow::requestCameraPermission()
+{
+    const QCameraPermission permission;
+    const auto status = qApp->checkPermission(permission);
+
+    if (status == Qt::PermissionStatus::Granted) {
+        refreshDevices();
+        return;
+    }
+
+    if (status == Qt::PermissionStatus::Denied) {
+        m_statusLabel->setText(
+            tr("摄像头权限已被拒绝。请在系统设置的“隐私与安全性 → 摄像头”中允许本软件。"));
+        m_deviceCombo->setEnabled(false);
+        m_formatCombo->setEnabled(false);
+        m_startButton->setEnabled(false);
+        return;
+    }
+
+    m_statusLabel->setText(tr("正在请求摄像头权限…"));
+    qApp->requestPermission(permission, this, [this](const QPermission &result) {
+        if (result.status() == Qt::PermissionStatus::Granted) {
+            m_statusLabel->setText(tr("摄像头权限已允许，正在查找设备…"));
+            refreshDevices();
+        } else {
+            m_statusLabel->setText(
+                tr("未获得摄像头权限，请允许访问后重新启动软件。"));
+            m_deviceCombo->setEnabled(false);
+            m_formatCombo->setEnabled(false);
+            m_startButton->setEnabled(false);
+        }
+    });
+}
+
+void MainWindow::buildUi()
+{
+    const QString buildId = QStringLiteral(APP_BUILD_ID).left(7);
+    setWindowTitle(tr("USB 摄像头控制 v%1 (%2)")
+                       .arg(QStringLiteral(APP_VERSION), buildId));
+    resize(1180, 720);
+    statusBar()->addPermanentWidget(
+        new QLabel(tr("版本 v%1 · %2").arg(QStringLiteral(APP_VERSION), buildId), this));
+
+    auto *central = new QWidget(this);
+    central->setObjectName(QStringLiteral("appRoot"));
+    auto *root = new QVBoxLayout(central);
+    root->setContentsMargins(18, 14, 18, 16);
+    root->setSpacing(14);
+
+    auto *header = new QFrame(central);
+    header->setObjectName(QStringLiteral("headerBar"));
+    auto *headerLayout = new QHBoxLayout(header);
+    headerLayout->setContentsMargins(18, 12, 18, 12);
+    auto *headingColumn = new QVBoxLayout;
+    headingColumn->setSpacing(2);
+    auto *appTitle = new QLabel(tr("USB Camera Control"), header);
+    appTitle->setObjectName(QStringLiteral("appTitle"));
+    auto *appSubtitle = new QLabel(tr("专业 USB 摄像头预览与参数控制"), header);
+    appSubtitle->setObjectName(QStringLiteral("appSubtitle"));
+    headingColumn->addWidget(appTitle);
+    headingColumn->addWidget(appSubtitle);
+    headerLayout->addLayout(headingColumn);
+    headerLayout->addStretch();
+    auto *languageCombo = new QComboBox(header);
+    languageCombo->setToolTip(tr("选择界面语言（重启后生效）"));
+    languageCombo->addItem(tr("跟随系统"), QStringLiteral("system"));
+    languageCombo->addItem(tr("简体中文"), QStringLiteral("zh_CN"));
+    languageCombo->addItem(QStringLiteral("English"), QStringLiteral("en_US"));
+    languageCombo->setMaximumWidth(140);
+    const QString savedLanguage = QSettings().value(
+        QStringLiteral("ui/language"), QStringLiteral("system")).toString();
+    const int languageIndex = languageCombo->findData(savedLanguage);
+    languageCombo->setCurrentIndex(languageIndex >= 0 ? languageIndex : 0);
+    headerLayout->addWidget(languageCombo);
+    m_connectionBadge = new QLabel(tr("●  正在连接"), header);
+    m_connectionBadge->setObjectName(QStringLiteral("connectionBadge"));
+    m_connectionBadge->setProperty("state", QStringLiteral("waiting"));
+    headerLayout->addWidget(m_connectionBadge);
+    root->addWidget(header);
+
+    auto *content = new QHBoxLayout;
+    content->setSpacing(14);
+    root->addLayout(content, 1);
+
+    m_videoWidget = new VideoPreviewWidget(central);
+    connect(m_videoWidget->videoSink(), &QVideoSink::videoFrameChanged,
+            this, [this](const QVideoFrame &frame) {
+                if (!frame.isValid())
+                    return;
+                if (!m_receivedFrame) {
+                    m_receivedFrame = true;
+                    setConnectionBadge(tr("●  预览正常"), QStringLiteral("ready"));
+                    m_statusLabel->setText(tr("预览正常：%1 × %2")
+                                               .arg(frame.width())
+                                               .arg(frame.height()));
+                }
+            });
+    auto *previewLayout = new QVBoxLayout;
+    auto *previewTools = new QHBoxLayout;
+    auto *fullScreenButton = new QPushButton(tr("全屏预览"), central);
+    auto *panelButton = new QPushButton(tr("收起面板"), central);
+    previewTools->addStretch();
+    previewTools->addWidget(fullScreenButton);
+    previewTools->addWidget(panelButton);
+    previewLayout->addLayout(previewTools);
+    previewLayout->addWidget(m_videoWidget, 1);
+    content->addLayout(previewLayout, 1);
+
+    auto *panel = new QFrame(central);
+    panel->setObjectName(QStringLiteral("sidePanel"));
+    panel->setMinimumWidth(320);
+    panel->setMaximumWidth(390);
+    auto *panelLayout = new QVBoxLayout(panel);
+    panelLayout->setContentsMargins(0, 0, 0, 0);
+    panelLayout->setSpacing(10);
+
+    auto *deviceGroup = new QGroupBox(tr("摄像头"), panel);
+    auto *deviceLayout = new QGridLayout(deviceGroup);
+    m_deviceCombo = new QComboBox(deviceGroup);
+    m_formatCombo = new QComboBox(deviceGroup);
+    m_startButton = new QPushButton(tr("启动预览"), deviceGroup);
+    m_startButton->setObjectName(QStringLiteral("primaryButton"));
+    auto *refreshButton = new QPushButton(tr("刷新设备"), deviceGroup);
+    m_deviceCombo->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
+    m_formatCombo->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
+    deviceLayout->addWidget(new QLabel(tr("设备"), deviceGroup), 0, 0);
+    deviceLayout->addWidget(m_deviceCombo, 0, 1);
+    deviceLayout->addWidget(new QLabel(tr("画质"), deviceGroup), 1, 0);
+    m_formatCombo->setToolTip(tr("分辨率与帧率"));
+    deviceLayout->addWidget(m_formatCombo, 1, 1);
+    deviceLayout->setColumnStretch(1, 1);
+    auto *buttonRow = new QHBoxLayout;
+    buttonRow->addWidget(refreshButton);
+    buttonRow->addWidget(m_startButton);
+    deviceLayout->addLayout(buttonRow, 2, 0, 1, 2);
+    panelLayout->addWidget(deviceGroup);
+    connect(panelButton, &QPushButton::clicked, this, [panel, panelButton, this] {
+        const bool hide = !panel->isHidden();
+        panel->setVisible(!hide);
+        panelButton->setText(hide ? tr("展开面板") : tr("收起面板"));
+    });
+    const auto toggleFullScreen = [this, header, panel, panelButton, fullScreenButton] {
+        const bool entering = !isFullScreen();
+        if (entering) {
+            panel->setProperty("visibleBeforeFullscreen", !panel->isHidden());
+            showFullScreen();
+        } else {
+            showNormal();
+        }
+        header->setVisible(!entering);
+        statusBar()->setVisible(!entering);
+        panelButton->setVisible(!entering);
+        panel->setVisible(!entering && panel->property("visibleBeforeFullscreen").toBool());
+        fullScreenButton->setText(entering ? tr("退出全屏 (Esc)") : tr("全屏预览"));
+    };
+    connect(fullScreenButton, &QPushButton::clicked, this, toggleFullScreen);
+    auto *escape = new QShortcut(QKeySequence(Qt::Key_Escape), this);
+    connect(escape, &QShortcut::activated, this, [this, toggleFullScreen] {
+        if (isFullScreen()) toggleFullScreen();
+    });
+
+    auto *tabs = new QTabWidget(panel);
+    tabs->setObjectName(QStringLiteral("controlTabs"));
+
+    auto *parameterPage = new QWidget(tabs);
+    auto *parameterPageLayout = new QVBoxLayout(parameterPage);
+    parameterPageLayout->setContentsMargins(0, 8, 0, 0);
+    auto *parameterTabs = new QTabWidget(parameterPage);
+    parameterTabs->setObjectName(QStringLiteral("parameterTabs"));
+    parameterPageLayout->addWidget(parameterTabs, 1);
+    auto *parameterScroll = new QScrollArea(parameterTabs);
+    parameterScroll->setWidgetResizable(true);
+    parameterScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    parameterScroll->setFrameShape(QFrame::NoFrame);
+    auto *parameterContent = new QWidget(parameterScroll);
+    parameterContent->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+    auto *parameterLayout = new QVBoxLayout(parameterContent);
+    parameterLayout->setContentsMargins(0, 0, 4, 0);
+    parameterLayout->setSpacing(8);
+    auto *focusScroll = new QScrollArea(parameterTabs);
+    focusScroll->setWidgetResizable(true);
+    focusScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    focusScroll->setFrameShape(QFrame::NoFrame);
+    auto *focusContent = new QWidget(focusScroll);
+    focusContent->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+    auto *focusLayout = new QVBoxLayout(focusContent);
+    focusLayout->setContentsMargins(0, 0, 4, 0);
+    focusScroll->setWidget(focusContent);
+    parameterTabs->addTab(parameterScroll, tr("曝光与色彩"));
+    parameterTabs->addTab(focusScroll, tr("对焦与变焦"));
+
+    auto *capturePage = new QWidget(tabs);
+    auto *capturePageLayout = new QVBoxLayout(capturePage);
+    capturePageLayout->setContentsMargins(0, 8, 0, 0);
+
+    auto *captureGroup = new QGroupBox(tr("截图与录像"), capturePage);
+    auto *captureLayout = new QVBoxLayout(captureGroup);
+    auto *captureButtons = new QHBoxLayout;
+    m_snapshotButton = new QPushButton(tr("截图"), captureGroup);
+    m_recordButton = new QPushButton(tr("开始录像"), captureGroup);
+    m_recordButton->setObjectName(QStringLiteral("recordButton"));
+    captureButtons->addWidget(m_snapshotButton);
+    captureButtons->addWidget(m_recordButton);
+    captureLayout->addLayout(captureButtons);
+    m_recordingStatus = new QLabel(tr("未在录像"), captureGroup);
+    m_recordingStatus->setObjectName(QStringLiteral("recordingStatus"));
+    captureLayout->addWidget(m_recordingStatus);
+    connect(m_recorder.get(), &QMediaRecorder::durationChanged, this, [this](qint64 duration) {
+        if (m_recorder->recorderState() != QMediaRecorder::RecordingState) return;
+        const qint64 seconds = duration / 1000;
+        const QString time = QStringLiteral("%1:%2:%3")
+            .arg(seconds / 3600, 2, 10, QLatin1Char('0'))
+            .arg((seconds / 60) % 60, 2, 10, QLatin1Char('0'))
+            .arg(seconds % 60, 2, 10, QLatin1Char('0'));
+        m_recordingStatus->setText(tr("● 正在录像 %1").arg(time));
+    });
+
+    auto *folderButtons = new QHBoxLayout;
+    auto *picturesFolderButton = new QPushButton(tr("图片文件夹"), captureGroup);
+    auto *moviesFolderButton = new QPushButton(tr("视频文件夹"), captureGroup);
+    folderButtons->addWidget(picturesFolderButton);
+    folderButtons->addWidget(moviesFolderButton);
+    captureLayout->addLayout(folderButtons);
+    auto *diagnosticsButton = new QPushButton(tr("导出诊断信息"), captureGroup);
+    diagnosticsButton->setToolTip(tr("保存软件、系统和摄像头状态，便于排查问题"));
+    captureLayout->addWidget(diagnosticsButton);
+
+    m_mirrorCheck = new QCheckBox(tr("左右镜像"), captureGroup);
+    m_verticalCheck = new QCheckBox(tr("上下翻转"), captureGroup);
+    m_rotationCombo = new QComboBox(captureGroup);
+    m_rotationCombo->addItem(tr("不旋转"), 0);
+    m_rotationCombo->addItem(tr("顺时针 90°"), 90);
+    m_rotationCombo->addItem(tr("旋转 180°"), 180);
+    m_rotationCombo->addItem(tr("顺时针 270°"), 270);
+    capturePageLayout->addWidget(captureGroup);
+    auto *directionGroup = new QGroupBox(tr("画面方向"), capturePage);
+    auto *directionLayout = new QVBoxLayout(directionGroup);
+    directionLayout->addWidget(m_mirrorCheck);
+    directionLayout->addWidget(m_verticalCheck);
+    directionLayout->addWidget(new QLabel(tr("画面旋转"), directionGroup));
+    directionLayout->addWidget(m_rotationCombo);
+    capturePageLayout->addWidget(directionGroup);
+    capturePageLayout->addStretch();
+
+    auto *imageGroup = new QGroupBox(tr("曝光补偿"), parameterContent);
+    auto *imageLayout = new QVBoxLayout(imageGroup);
+
+    auto addSlider = [&](const QString &name, QSlider *&slider, QLabel *&value) {
+        auto *labelRow = new QHBoxLayout;
+        labelRow->addWidget(new QLabel(name, imageGroup));
+        value = new QLabel("--", imageGroup);
+        labelRow->addStretch();
+        labelRow->addWidget(value);
+        slider = new QSlider(Qt::Horizontal, imageGroup);
+        imageLayout->addLayout(labelRow);
+        imageLayout->addWidget(slider);
+    };
+
+    addSlider(tr("曝光补偿"), m_exposureSlider, m_exposureValue);
+    parameterLayout->addWidget(imageGroup);
+    auto *zoomGroup = new QGroupBox(tr("变焦"), focusContent);
+    auto *zoomLayout = new QVBoxLayout(zoomGroup);
+    m_zoomValue = new QLabel("--", zoomGroup);
+    m_zoomSlider = new QSlider(Qt::Horizontal, zoomGroup);
+    zoomLayout->addWidget(m_zoomValue);
+    zoomLayout->addWidget(m_zoomSlider);
+    focusLayout->addWidget(zoomGroup);
+
+    auto *nativeGroup = new QGroupBox(tr("色彩与曝光"), parameterContent);
+    m_nativeControlsLayout = new QVBoxLayout(nativeGroup);
+    m_nativeControlsLayout->addWidget(new QLabel(tr("选择摄像头后读取硬件参数"), nativeGroup));
+    nativeGroup->setVisible(static_cast<bool>(m_nativeControls));
+    parameterLayout->addWidget(nativeGroup);
+    parameterLayout->addStretch();
+    auto *focusGroup = new QGroupBox(tr("镜头控制"), focusContent);
+    m_focusControlsLayout = new QVBoxLayout(focusGroup);
+    focusLayout->addWidget(focusGroup);
+    focusLayout->addStretch();
+    parameterScroll->setWidget(parameterContent);
+    m_parameterActions = new QWidget(parameterPage);
+    auto *actions = new QGridLayout(m_parameterActions);
+    actions->setContentsMargins(0, 4, 0, 0);
+    auto *saveButton = new QPushButton(tr("保存参数"), m_parameterActions);
+    auto *loadButton = new QPushButton(tr("应用参数"), m_parameterActions);
+    auto *resetButton = new QPushButton(tr("恢复初始设置"), m_parameterActions);
+    saveButton->setToolTip(tr("保存当前摄像头的参数"));
+    loadButton->setToolTip(tr("应用之前保存的参数"));
+    resetButton->setToolTip(tr("恢复本次打开摄像头时的参数和自动模式"));
+    actions->addWidget(saveButton, 0, 0);
+    actions->addWidget(loadButton, 0, 1);
+    actions->addWidget(resetButton, 1, 0, 1, 2);
+    parameterPageLayout->addWidget(m_parameterActions);
+    m_parameterActions->setEnabled(false);
+    connect(saveButton, &QPushButton::clicked, this, &MainWindow::saveNativePreset);
+    connect(loadButton, &QPushButton::clicked, this, &MainWindow::loadNativePreset);
+    connect(resetButton, &QPushButton::clicked, this, &MainWindow::resetNativeControls);
+
+    tabs->addTab(parameterPage, tr("参数设置"));
+    tabs->addTab(capturePage, tr("拍摄与画面"));
+    panelLayout->addWidget(tabs, 1);
+
+    m_statusLabel = new QLabel(tr("正在查找摄像头…"), panel);
+    m_statusLabel->setObjectName(QStringLiteral("statusCard"));
+    m_statusLabel->setWordWrap(true);
+    panelLayout->addWidget(m_statusLabel);
+    content->addWidget(panel);
+    setCentralWidget(central);
+
+    connect(refreshButton, &QPushButton::clicked, this, &MainWindow::refreshDevices);
+    connect(m_deviceCombo, &QComboBox::currentIndexChanged, this, &MainWindow::selectCamera);
+    connect(m_formatCombo, &QComboBox::currentIndexChanged, this, &MainWindow::selectFormat);
+    connect(m_startButton, &QPushButton::clicked, this, &MainWindow::toggleCamera);
+    connect(m_snapshotButton, &QPushButton::clicked, this, &MainWindow::takeSnapshot);
+    connect(m_recordButton, &QPushButton::clicked, this, &MainWindow::toggleRecording);
+    connect(picturesFolderButton, &QPushButton::clicked, this, &MainWindow::openPicturesFolder);
+    connect(moviesFolderButton, &QPushButton::clicked, this, &MainWindow::openMoviesFolder);
+    connect(diagnosticsButton, &QPushButton::clicked, this, &MainWindow::exportDiagnostics);
+    connect(languageCombo, &QComboBox::currentIndexChanged, this,
+            [this, languageCombo](int index) {
+                const QString language = languageCombo->itemData(index).toString();
+                QSettings settings;
+                if (settings.value(QStringLiteral("ui/language"), QStringLiteral("system"))
+                        .toString() == language)
+                    return;
+                settings.setValue(QStringLiteral("ui/language"), language);
+                QMessageBox::information(this, tr("语言设置"),
+                                         tr("界面语言将在重新启动软件后生效。"));
+            });
+    connect(m_mirrorCheck, &QCheckBox::toggled, this, [this](bool enabled) {
+        m_videoWidget->setMirrored(enabled);
+        QSettings().setValue(QStringLiteral("preview/mirrored"), enabled);
+    });
+    connect(m_verticalCheck, &QCheckBox::toggled, this, [this](bool enabled) {
+        m_videoWidget->setFlippedVertically(enabled);
+        QSettings().setValue(QStringLiteral("preview/flippedVertically"), enabled);
+    });
+    connect(m_rotationCombo, &QComboBox::currentIndexChanged, this,
+            [this](int index) {
+                const int rotation = m_rotationCombo->itemData(index).toInt();
+                m_videoWidget->setRotation(rotation);
+                QSettings().setValue(QStringLiteral("preview/rotation"), rotation);
+            });
+    connect(m_recorder.get(), &QMediaRecorder::recorderStateChanged,
+            this, &MainWindow::updateRecorderState);
+    connect(m_recorder.get(), &QMediaRecorder::errorOccurred,
+            this, &MainWindow::showRecorderError);
+    connect(tabs, &QTabWidget::currentChanged, this, [](int index) {
+        QSettings().setValue(QStringLiteral("ui/lastControlTab"), index);
+    });
+
+    QSettings settings;
+    m_mirrorCheck->setChecked(settings.value(QStringLiteral("preview/mirrored"), false).toBool());
+    m_verticalCheck->setChecked(
+        settings.value(QStringLiteral("preview/flippedVertically"), false).toBool());
+    const int savedRotation = settings.value(QStringLiteral("preview/rotation"), 0).toInt();
+    const int rotationIndex = m_rotationCombo->findData(savedRotation);
+    m_rotationCombo->setCurrentIndex(rotationIndex >= 0 ? rotationIndex : 0);
+    tabs->setCurrentIndex(settings.value(QStringLiteral("ui/lastControlTab"), 0).toInt());
+
+    connect(m_exposureSlider, &QSlider::valueChanged, this, [this](int value) {
+        if (!m_camera)
+            return;
+        const float exposure = static_cast<float>(value) / SliderScale;
+        m_camera->setExposureCompensation(exposure);
+        m_exposureValue->setText(QString::number(exposure, 'f', 1));
+    });
+    connect(m_zoomSlider, &QSlider::valueChanged, this, [this](int value) {
+        if (!m_camera)
+            return;
+        const float zoom = static_cast<float>(value) / SliderScale;
+        m_camera->zoomTo(zoom, 0.15f);
+        m_zoomValue->setText(QString::number(zoom, 'f', 1) + QStringLiteral("×"));
+    });
+}
+
+void MainWindow::handleDeviceChange()
+{
+    if (m_recorder->recorderState() == QMediaRecorder::RecordingState)
+        m_recorder->stop();
+
+    ++m_cameraGeneration;
+    releaseCameraSession();
+    m_formatCombo->setEnabled(false);
+    m_startButton->setEnabled(false);
+    setConnectionBadge(tr("●  设备变化"), QStringLiteral("waiting"));
+    m_statusLabel->setText(tr("检测到摄像头变化，正在重新连接…"));
+    m_deviceRefreshTimer.start();
+}
+
+void MainWindow::refreshDevices()
+{
+    const auto devices = QMediaDevices::videoInputs();
+    if (m_preferredDeviceId.isEmpty())
+        m_preferredDeviceId = QSettings().value(QStringLiteral("device/lastId")).toByteArray();
+    m_deviceCombo->blockSignals(true);
+    m_deviceCombo->clear();
+
+    int selected = -1;
+    for (int i = 0; i < devices.size(); ++i) {
+        const auto &device = devices.at(i);
+        m_deviceCombo->addItem(device.description(), device.id());
+        if (device.id() == m_preferredDeviceId
+            || (m_preferredDeviceId.isEmpty() && device.isDefault()))
+            selected = i;
+    }
+    m_deviceCombo->blockSignals(false);
+
+    const bool found = !devices.isEmpty();
+    m_deviceCombo->setEnabled(found);
+    m_startButton->setEnabled(found);
+    if (!found) {
+        ++m_cameraGeneration;
+        releaseCameraSession();
+        m_currentDeviceName.clear();
+        m_currentDeviceId.clear();
+        m_formatCombo->clear();
+        m_formatCombo->setEnabled(false);
+        m_snapshotButton->setEnabled(false);
+        m_recordButton->setEnabled(false);
+        m_parameterActions->setEnabled(false);
+        clearLayout(m_nativeControlsLayout);
+        clearLayout(m_focusControlsLayout);
+        m_statusLabel->setText(tr("未检测到摄像头，请连接 USB 摄像头后刷新。"));
+        setConnectionBadge(tr("●  未连接"), QStringLiteral("error"));
+        syncControls();
+        return;
+    }
+
+    const int index = selected >= 0 ? selected : 0;
+    m_deviceCombo->setCurrentIndex(index);
+    openCamera(devices.at(index));
+}
+
+void MainWindow::selectCamera(int index)
+{
+    const auto devices = QMediaDevices::videoInputs();
+    if (index < 0 || index >= devices.size())
+        return;
+    m_preferredDeviceId = devices.at(index).id();
+    QSettings().setValue(QStringLiteral("device/lastId"), m_preferredDeviceId);
+    openCamera(devices.at(index));
+}
+
+void MainWindow::openCamera(const QCameraDevice &device)
+{
+    const quint64 generation = ++m_cameraGeneration;
+    releaseCameraSession();
+    m_currentDeviceName = device.description();
+    m_currentDeviceId = device.id();
+    m_streamRetryCount = 0;
+    setConnectionBadge(tr("●  正在启动"), QStringLiteral("waiting"));
+    m_statusLabel->setText(tr("正在准备：%1").arg(device.description()));
+
+    // macOS needs a short interval after a USB hot-plug or camera switch to
+    // retire the previous CMIO stream index before a new session is created.
+    QTimer::singleShot(500, this, [this, device, generation] {
+        createCameraSession(device, generation);
+    });
+}
+
+void MainWindow::releaseCameraSession()
+{
+    if (m_camera) {
+        disconnect(m_camera.get(), nullptr, this, nullptr);
+        m_camera->stop();
+    }
+    m_captureSession.setCamera(nullptr);
+    m_captureSession.setVideoSink(nullptr);
+    m_camera.reset();
+    m_receivedFrame = false;
+    if (m_videoWidget)
+        m_videoWidget->clearFrame();
+}
+
+void MainWindow::createCameraSession(const QCameraDevice &device, quint64 generation,
+                                     bool useStableFormat)
+{
+    if (generation != m_cameraGeneration)
+        return;
+
+    m_camera = std::make_unique<QCamera>(device);
+    m_captureSession.setCamera(m_camera.get());
+    m_captureSession.setVideoSink(m_videoWidget->videoSink());
+    connect(m_camera.get(), &QCamera::activeChanged, this, &MainWindow::updateCameraState);
+    connect(m_camera.get(), &QCamera::errorOccurred, this, &MainWindow::showCameraError);
+
+    populateFormats(device);
+    if (useStableFormat) {
+        const QCameraFormat format = stableCameraFormat(device);
+        if (!format.isNull()) {
+            m_camera->setCameraFormat(format);
+            const int index = m_formatCombo->findData(QVariant::fromValue(format));
+            if (index >= 0)
+                m_formatCombo->setCurrentIndex(index);
+        }
+    }
+    if (m_nativeControls) {
+        m_nativeControls->open(device.description());
+        rebuildNativeControls();
+    }
+    syncControls();
+    m_formatCombo->setEnabled(true);
+    m_snapshotButton->setEnabled(true);
+    m_recordButton->setEnabled(true);
+    m_receivedFrame = false;
+    setConnectionBadge(tr("●  正在启动"), QStringLiteral("waiting"));
+    m_statusLabel->setText(useStableFormat
+        ? tr("正在使用兼容格式重试：%1").arg(device.description())
+        : tr("正在启动：%1").arg(device.description()));
+    if (m_previewRequested)
+        m_camera->start();
+    checkForFirstFrame(generation);
+}
+
+void MainWindow::checkForFirstFrame(quint64 generation)
+{
+    QTimer::singleShot(3500, this, [this, generation] {
+        if (generation != m_cameraGeneration || !m_camera || !m_previewRequested
+            || m_receivedFrame)
+            return;
+        retryCameraStream(generation);
+    });
+}
+
+void MainWindow::retryCameraStream(quint64 generation)
+{
+    if (generation != m_cameraGeneration || m_currentDeviceId.isEmpty())
+        return;
+
+    const auto devices = QMediaDevices::videoInputs();
+    const auto found = std::find_if(devices.cbegin(), devices.cend(), [this](const QCameraDevice &item) {
+        return item.id() == m_currentDeviceId;
+    });
+    if (found == devices.cend()) {
+        m_statusLabel->setText(tr("USB 摄像头已断开，等待重新连接…"));
+        setConnectionBadge(tr("●  等待重连"), QStringLiteral("waiting"));
+        return;
+    }
+
+    if (m_streamRetryCount >= 2) {
+        m_statusLabel->setText(tr("USB 摄像头没有返回画面，请重新插拔后再试。"));
+        setConnectionBadge(tr("●  无视频画面"), QStringLiteral("error"));
+        return;
+    }
+
+    ++m_streamRetryCount;
+    const bool useStableFormat = m_streamRetryCount >= 2;
+    setConnectionBadge(tr("●  正在重试"), QStringLiteral("waiting"));
+    m_statusLabel->setText(tr("尚未收到画面，正在重新建立摄像头连接（%1/2）…")
+                               .arg(m_streamRetryCount));
+    releaseCameraSession();
+    QTimer::singleShot(800, this, [this, device = *found, generation, useStableFormat] {
+        createCameraSession(device, generation, useStableFormat);
+    });
+}
+
+QCameraFormat MainWindow::stableCameraFormat(const QCameraDevice &device) const
+{
+    const auto formats = device.videoFormats();
+    if (formats.isEmpty())
+        return {};
+
+    const auto score = [](const QCameraFormat &format) {
+        const QSize resolution = format.resolution();
+        const int pixelDifference = std::abs(resolution.width() * resolution.height()
+                                             - 1920 * 1080);
+        const int highFrameRatePenalty = format.maxFrameRate() > 30.5f ? 100000000 : 0;
+        return highFrameRatePenalty + pixelDifference;
+    };
+    return *std::min_element(formats.cbegin(), formats.cend(),
+                             [&score](const QCameraFormat &left, const QCameraFormat &right) {
+        return score(left) < score(right);
+    });
+}
+
+void MainWindow::rebuildNativeControls()
+{
+    if (!m_nativeControlsLayout || !m_nativeControls)
+        return;
+
+    clearLayout(m_nativeControlsLayout);
+    clearLayout(m_focusControlsLayout);
+
+    const auto controls = m_nativeControls->controls();
+    m_parameterActions->setEnabled(!controls.isEmpty());
+    const bool nativeZoom = std::any_of(controls.begin(), controls.end(), [](const auto &control) {
+        return control.id == NativeCameraControls::Id::Zoom;
+    });
+    m_zoomSlider->parentWidget()->setVisible(!nativeZoom);
+    auto *focusHint = new QLabel(tr("仅显示此摄像头支持的镜头参数。"), this);
+    focusHint->setWordWrap(true);
+    focusHint->setObjectName(QStringLiteral("secondaryText"));
+    m_focusControlsLayout->addWidget(focusHint);
+    if (controls.isEmpty()) {
+        auto *message = new QLabel(m_nativeControls->errorString(), this);
+        message->setWordWrap(true);
+        m_nativeControlsLayout->addWidget(message);
+        return;
+    }
+
+    auto *capabilityLabel = new QLabel(
+        tr("已识别 %1 项可调参数，仅显示当前摄像头支持的项目。")
+            .arg(controls.size()), this);
+    capabilityLabel->setObjectName(QStringLiteral("secondaryText"));
+    capabilityLabel->setWordWrap(true);
+    m_nativeControlsLayout->addWidget(capabilityLabel);
+
+    for (const auto &control : controls) {
+        QString controlName = control.name;
+        switch (control.id) {
+        case NativeCameraControls::Id::Brightness: controlName = tr("亮度"); break;
+        case NativeCameraControls::Id::Contrast: controlName = tr("对比度"); break;
+        case NativeCameraControls::Id::Hue: controlName = tr("色相"); break;
+        case NativeCameraControls::Id::Saturation: controlName = tr("饱和度"); break;
+        case NativeCameraControls::Id::Sharpness: controlName = tr("锐度"); break;
+        case NativeCameraControls::Id::Gamma: controlName = QStringLiteral("Gamma"); break;
+        case NativeCameraControls::Id::WhiteBalance: controlName = tr("白平衡"); break;
+        case NativeCameraControls::Id::BacklightCompensation: controlName = tr("背光补偿"); break;
+        case NativeCameraControls::Id::Gain: controlName = tr("增益"); break;
+        case NativeCameraControls::Id::Zoom: controlName = tr("变焦"); break;
+        case NativeCameraControls::Id::Exposure: controlName = tr("曝光"); break;
+        case NativeCameraControls::Id::Focus: controlName = tr("对焦"); break;
+        }
+        auto *container = new QWidget(this);
+        auto *layout = new QVBoxLayout(container);
+        layout->setContentsMargins(0, 2, 0, 2);
+
+        auto *titleRow = new QHBoxLayout;
+        auto *title = new QLabel(controlName, container);
+        auto *valueInput = new QSpinBox(container);
+        valueInput->setRange(static_cast<int>(control.minimum),
+                             static_cast<int>(control.maximum));
+        valueInput->setSingleStep(static_cast<int>(control.step));
+        valueInput->setValue(static_cast<int>(control.value));
+        valueInput->setToolTip(tr("范围：%1 ～ %2，初始值：%3")
+                                   .arg(control.minimum)
+                                   .arg(control.maximum)
+                                   .arg(control.defaultValue));
+        valueInput->setMaximumWidth(92);
+        auto *autoBox = new QCheckBox(tr("自动"), container);
+        autoBox->setVisible(control.autoSupported);
+        autoBox->setChecked(control.automatic);
+        titleRow->addWidget(title);
+        titleRow->addStretch();
+        titleRow->addWidget(valueInput);
+        titleRow->addWidget(autoBox);
+
+        auto *slider = new QSlider(Qt::Horizontal, container);
+        slider->setRange(static_cast<int>(control.minimum),
+                         static_cast<int>(control.maximum));
+        slider->setSingleStep(static_cast<int>(control.step));
+        slider->setPageStep(static_cast<int>(control.step));
+        slider->setValue(static_cast<int>(control.value));
+        slider->setEnabled(!control.automatic);
+        valueInput->setEnabled(!control.automatic);
+        auto *automaticHint = new QLabel(tr("自动调节中，关闭自动后可手动修改"), container);
+        automaticHint->setObjectName(QStringLiteral("secondaryText"));
+        automaticHint->setWordWrap(true);
+        automaticHint->setVisible(control.automatic);
+
+        connect(slider, &QSlider::valueChanged, this,
+                [this, id = control.id, valueInput, name = controlName](int value) {
+                    if (m_nativeControls->setValue(id, value)) {
+                        const QSignalBlocker blocker(valueInput);
+                        valueInput->setValue(value);
+                    } else {
+                        m_statusLabel->setText(tr("%1设置失败，摄像头未接受该数值").arg(name));
+                    }
+                });
+        connect(valueInput, &QSpinBox::valueChanged, this,
+                [this, id = control.id, slider, name = controlName](int value) {
+                    if (m_nativeControls->setValue(id, value)) {
+                        const QSignalBlocker blocker(slider);
+                        slider->setValue(value);
+                    } else {
+                        m_statusLabel->setText(tr("%1设置失败，摄像头未接受该数值").arg(name));
+                    }
+                });
+        connect(autoBox, &QCheckBox::toggled, this,
+                [this, id = control.id, slider, valueInput, autoBox, automaticHint, name = controlName](bool enabled) {
+                    if (m_nativeControls->setAutomatic(id, enabled)) {
+                        slider->setEnabled(!enabled);
+                        valueInput->setEnabled(!enabled);
+                        automaticHint->setVisible(enabled);
+                    } else {
+                        const QSignalBlocker blocker(autoBox);
+                        autoBox->setChecked(!enabled);
+                        m_statusLabel->setText(tr("%1的自动模式切换失败").arg(name));
+                    }
+                });
+
+        layout->addLayout(titleRow);
+        layout->addWidget(slider);
+        layout->addWidget(automaticHint);
+        const bool lens = control.id == NativeCameraControls::Id::Focus
+            || control.id == NativeCameraControls::Id::Zoom;
+        (lens ? m_focusControlsLayout : m_nativeControlsLayout)->addWidget(container);
+    }
+}
+
+QString MainWindow::presetGroup() const
+{
+    const QByteArray encoded = m_currentDeviceName.toUtf8().toBase64(
+        QByteArray::Base64UrlEncoding | QByteArray::OmitTrailingEquals);
+    return QStringLiteral("cameraPresets/%1").arg(QString::fromLatin1(encoded));
+}
+
+void MainWindow::saveNativePreset()
+{
+    if (!m_nativeControls || m_currentDeviceName.isEmpty())
+        return;
+
+    QSettings settings;
+    settings.beginGroup(presetGroup());
+    settings.remove(QString());
+    settings.setValue(QStringLiteral("deviceName"), m_currentDeviceName);
+    for (const auto &control : m_nativeControls->controls()) {
+        const QString key = QString::number(static_cast<int>(control.id));
+        settings.setValue(key + QStringLiteral("/value"),
+                          static_cast<qlonglong>(control.value));
+        settings.setValue(key + QStringLiteral("/automatic"), control.automatic);
+    }
+    settings.endGroup();
+    settings.sync();
+    if (settings.status() == QSettings::NoError)
+        m_statusLabel->setText(tr("保存成功：已保存“%1”的 %2 项参数")
+                                   .arg(m_currentDeviceName)
+                                   .arg(m_nativeControls->controls().size()));
+    else
+        m_statusLabel->setText(tr("保存失败：无法写入本机设置"));
+}
+
+void MainWindow::loadNativePreset()
+{
+    if (!m_nativeControls || m_currentDeviceName.isEmpty())
+        return;
+
+    QSettings settings;
+    settings.beginGroup(presetGroup());
+    if (!settings.contains(QStringLiteral("deviceName"))) {
+        settings.endGroup();
+        m_statusLabel->setText(tr("当前摄像头还没有已保存的设置"));
+        return;
+    }
+
+    int applied = 0;
+    QStringList failed;
+    for (const auto &control : m_nativeControls->controls()) {
+        const QString key = QString::number(static_cast<int>(control.id));
+        const QString valueKey = key + QStringLiteral("/value");
+        if (!settings.contains(valueKey))
+            continue;
+        const long value = settings.value(valueKey).toLongLong();
+        const bool automatic = settings.value(key + QStringLiteral("/automatic"), false).toBool();
+        if (m_nativeControls->setValue(control.id, value))
+            ++applied;
+        else
+            failed.append(control.name);
+        if (control.autoSupported && automatic
+            && !m_nativeControls->setAutomatic(control.id, true)
+            && !failed.contains(control.name))
+            failed.append(control.name);
+    }
+    settings.endGroup();
+    rebuildNativeControls();
+    if (failed.isEmpty())
+        m_statusLabel->setText(tr("应用成功：已更新 %1 项参数").arg(applied));
+    else
+        m_statusLabel->setText(tr("部分参数未应用：%1（成功 %2 项）")
+                                   .arg(failed.join(QStringLiteral("、")))
+                                   .arg(applied));
+}
+
+void MainWindow::resetNativeControls()
+{
+    if (!m_nativeControls)
+        return;
+
+    int applied = 0;
+    QStringList failed;
+    for (const auto &control : m_nativeControls->controls()) {
+        if (m_nativeControls->setValue(control.id, control.defaultValue))
+            ++applied;
+        else
+            failed.append(control.name);
+        if (control.autoSupported
+            && !m_nativeControls->setAutomatic(control.id, control.defaultAutomatic)
+            && !failed.contains(control.name)) {
+            failed.append(control.name);
+        }
+    }
+    rebuildNativeControls();
+    if (failed.isEmpty())
+        m_statusLabel->setText(tr("恢复成功：已恢复 %1 项初始设置").arg(applied));
+    else
+        m_statusLabel->setText(tr("部分参数未恢复：%1（成功 %2 项）")
+                                   .arg(failed.join(QStringLiteral("、")))
+                                   .arg(applied));
+}
+
+void MainWindow::populateFormats(const QCameraDevice &device)
+{
+    m_formatCombo->blockSignals(true);
+    m_formatCombo->clear();
+    m_formatCombo->addItem(tr("自动（推荐）"), QVariant::fromValue(QCameraFormat{}));
+    auto formats = device.videoFormats();
+    std::sort(formats.begin(), formats.end(), [](const QCameraFormat &a, const QCameraFormat &b) {
+        const int aPixels = a.resolution().width() * a.resolution().height();
+        const int bPixels = b.resolution().width() * b.resolution().height();
+        return aPixels == bPixels ? a.maxFrameRate() > b.maxFrameRate() : aPixels > bPixels;
+    });
+    for (const auto &format : formats)
+        m_formatCombo->addItem(formatLabel(format), QVariant::fromValue(format));
+    m_formatCombo->blockSignals(false);
+
+    m_camera->setCameraFormat(QCameraFormat{});
+    m_formatCombo->setCurrentIndex(0);
+}
+
+QString MainWindow::formatLabel(const QCameraFormat &format) const
+{
+    return QStringLiteral("%1 × %2   %3 fps")
+        .arg(format.resolution().width())
+        .arg(format.resolution().height())
+        .arg(format.maxFrameRate(), 0, 'f', 0);
+}
+
+void MainWindow::selectFormat(int index)
+{
+    if (!m_camera || index < 0)
+        return;
+    const auto format = m_formatCombo->itemData(index).value<QCameraFormat>();
+    const bool wasActive = m_camera->isActive();
+    if (wasActive)
+        m_camera->stop();
+    m_receivedFrame = false;
+    m_camera->setCameraFormat(format);
+    if (wasActive)
+        m_camera->start();
+    const quint64 generation = m_cameraGeneration;
+    QTimer::singleShot(3000, this, [this, generation] {
+        if (generation == m_cameraGeneration && m_camera
+            && m_camera->isActive() && !m_receivedFrame)
+            m_statusLabel->setText(tr("当前格式没有收到画面，请改回“自动（推荐）”。"));
+    });
+}
+
+void MainWindow::toggleCamera()
+{
+    if (!m_camera)
+        return;
+    if (m_camera->isActive() && m_recorder->recorderState() == QMediaRecorder::RecordingState)
+        m_recorder->stop();
+    m_previewRequested = !m_camera->isActive();
+    m_camera->isActive() ? m_camera->stop() : m_camera->start();
+}
+
+void MainWindow::updateCameraState()
+{
+    if (!m_camera)
+        return;
+    m_startButton->setText(m_camera->isActive() ? tr("停止预览") : tr("启动预览"));
+    if (m_camera->isActive()) {
+        if (!m_receivedFrame)
+            setConnectionBadge(tr("●  等待画面"), QStringLiteral("waiting"));
+    } else {
+        setConnectionBadge(tr("●  已停止"), QStringLiteral("waiting"));
+    }
+    m_statusLabel->setText(m_camera->isActive() ? tr("摄像头正在运行") : tr("摄像头已停止"));
+}
+
+void MainWindow::showCameraError()
+{
+    if (!m_camera || m_camera->error() == QCamera::NoError)
+        return;
+    setConnectionBadge(tr("●  摄像头错误"), QStringLiteral("error"));
+    m_statusLabel->setText(tr("摄像头错误：%1").arg(m_camera->errorString()));
+}
+
+void MainWindow::setConnectionBadge(const QString &text, const QString &state)
+{
+    if (!m_connectionBadge)
+        return;
+    m_connectionBadge->setText(text);
+    m_connectionBadge->setProperty("state", state);
+    m_connectionBadge->style()->unpolish(m_connectionBadge);
+    m_connectionBadge->style()->polish(m_connectionBadge);
+}
+
+void MainWindow::takeSnapshot()
+{
+    const QImage image = m_videoWidget->currentImage();
+    if (image.isNull()) {
+        m_statusLabel->setText(tr("截图失败：当前还没有可用画面"));
+        return;
+    }
+
+    QDir directory(mediaDirectory(QStandardPaths::PicturesLocation));
+    if (!directory.exists() && !directory.mkpath(QStringLiteral("."))) {
+        m_statusLabel->setText(tr("截图失败：无法创建图片保存目录"));
+        return;
+    }
+
+    const QString fileName = QStringLiteral("截图_%1.png")
+        .arg(QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd_HHmmss_zzz")));
+    const QString path = directory.filePath(fileName);
+    if (image.save(path, "PNG"))
+        m_statusLabel->setText(tr("截图已保存：%1").arg(QDir::toNativeSeparators(path)));
+    else
+        m_statusLabel->setText(tr("截图失败：无法写入文件"));
+}
+
+void MainWindow::toggleRecording()
+{
+    if (m_recorder->recorderState() == QMediaRecorder::RecordingState) {
+        m_recorder->stop();
+        return;
+    }
+    if (!m_camera) {
+        m_statusLabel->setText(tr("录像失败：未选择摄像头"));
+        return;
+    }
+    if (!m_camera->isActive()) {
+        m_previewRequested = true;
+        m_camera->start();
+    }
+
+    QDir directory(mediaDirectory(QStandardPaths::MoviesLocation));
+    if (!directory.exists() && !directory.mkpath(QStringLiteral("."))) {
+        m_statusLabel->setText(tr("录像失败：无法创建视频保存目录"));
+        return;
+    }
+
+    const QString fileName = QStringLiteral("录像_%1.mp4")
+        .arg(QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd_HHmmss")));
+    m_recorder->setOutputLocation(QUrl::fromLocalFile(directory.filePath(fileName)));
+    m_recorder->setQuality(QMediaRecorder::HighQuality);
+    m_recorder->record();
+}
+
+void MainWindow::updateRecorderState()
+{
+    const bool recording = m_recorder->recorderState() == QMediaRecorder::RecordingState;
+    m_recordButton->setText(recording ? tr("停止录像") : tr("开始录像"));
+    m_recordButton->setProperty("recording", recording);
+    m_recordingStatus->setText(recording ? tr("● 正在录像 %1").arg(QStringLiteral("00:00:00"))
+                                         : tr("未在录像"));
+    m_recordingStatus->setStyleSheet(recording ? QStringLiteral("color: #c93442; font-weight: 600;") : QString());
+    m_recordButton->style()->unpolish(m_recordButton);
+    m_recordButton->style()->polish(m_recordButton);
+    if (recording) {
+        m_statusLabel->setText(tr("正在录像…"));
+    } else if (!m_recorder->actualLocation().isEmpty()) {
+        m_statusLabel->setText(tr("录像已保存：%1")
+                                   .arg(QDir::toNativeSeparators(
+                                       m_recorder->actualLocation().toLocalFile())));
+    }
+}
+
+void MainWindow::showRecorderError()
+{
+    if (m_recorder->error() == QMediaRecorder::NoError)
+        return;
+    m_statusLabel->setText(tr("录像错误：%1").arg(m_recorder->errorString()));
+}
+
+QString MainWindow::mediaDirectory(QStandardPaths::StandardLocation location) const
+{
+    return QDir(QStandardPaths::writableLocation(location))
+        .filePath(QStringLiteral("USB Camera Control"));
+}
+
+bool MainWindow::openFolder(const QString &path, const QString &name)
+{
+    QDir directory(path);
+    if (!directory.exists() && !directory.mkpath(QStringLiteral("."))) {
+        m_statusLabel->setText(tr("无法创建%1保存目录").arg(name));
+        return false;
+    }
+    if (!QDesktopServices::openUrl(QUrl::fromLocalFile(directory.absolutePath()))) {
+        m_statusLabel->setText(tr("无法打开%1保存目录").arg(name));
+        return false;
+    }
+    m_statusLabel->setText(tr("已打开%1保存目录").arg(name));
+    return true;
+}
+
+void MainWindow::openPicturesFolder()
+{
+    openFolder(mediaDirectory(QStandardPaths::PicturesLocation), tr("图片"));
+}
+
+void MainWindow::openMoviesFolder()
+{
+    openFolder(mediaDirectory(QStandardPaths::MoviesLocation), tr("视频"));
+}
+
+void MainWindow::exportDiagnostics()
+{
+    const QString fileName = QStringLiteral("USB-Camera-Control-Diagnostics-%1.txt")
+        .arg(QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd-HHmmss")));
+    const QString defaultPath = QDir(
+        QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation)).filePath(fileName);
+    const QString path = QFileDialog::getSaveFileName(
+        this, tr("导出诊断信息"), defaultPath, tr("文本文件 (*.txt)"));
+    if (path.isEmpty())
+        return;
+
+    QStringList lines;
+    const auto add = [&lines](const QString &key, const QString &value) {
+        lines.append(QStringLiteral("%1: %2").arg(key, value));
+    };
+    add(QStringLiteral("GeneratedAt"),
+        QDateTime::currentDateTime().toString(Qt::ISODateWithMs));
+    add(QStringLiteral("AppVersion"), QStringLiteral(APP_VERSION));
+    add(QStringLiteral("BuildId"), QStringLiteral(APP_BUILD_ID));
+    add(QStringLiteral("QtVersion"), QString::fromLatin1(qVersion()));
+    add(QStringLiteral("OperatingSystem"), QSysInfo::prettyProductName());
+    add(QStringLiteral("Kernel"),
+        QStringLiteral("%1 %2").arg(QSysInfo::kernelType(), QSysInfo::kernelVersion()));
+    add(QStringLiteral("CpuArchitecture"), QSysInfo::currentCpuArchitecture());
+    add(QStringLiteral("SystemLocale"), QLocale::system().name());
+
+    QSettings settings;
+    add(QStringLiteral("LanguageSetting"),
+        settings.value(QStringLiteral("ui/language"), QStringLiteral("system")).toString());
+    add(QStringLiteral("SelectedDevice"), m_currentDeviceName);
+    add(QStringLiteral("SelectedFormat"), m_formatCombo->currentText());
+    add(QStringLiteral("PreviewRequested"), m_previewRequested ? QStringLiteral("true")
+                                                                 : QStringLiteral("false"));
+    add(QStringLiteral("CameraCreated"), m_camera ? QStringLiteral("true")
+                                                   : QStringLiteral("false"));
+    add(QStringLiteral("CameraActive"), m_camera && m_camera->isActive()
+                                            ? QStringLiteral("true") : QStringLiteral("false"));
+    add(QStringLiteral("FrameReceived"), m_receivedFrame ? QStringLiteral("true")
+                                                           : QStringLiteral("false"));
+    const QImage image = m_videoWidget->currentImage();
+    add(QStringLiteral("LastFrameSize"), image.isNull()
+            ? QStringLiteral("none")
+            : QStringLiteral("%1x%2").arg(image.width()).arg(image.height()));
+    if (m_camera) {
+        add(QStringLiteral("CameraErrorCode"), QString::number(m_camera->error()));
+        add(QStringLiteral("CameraErrorText"), m_camera->errorString());
+    }
+    add(QStringLiteral("RecorderState"),
+        QString::number(static_cast<int>(m_recorder->recorderState())));
+    add(QStringLiteral("RecorderErrorCode"), QString::number(m_recorder->error()));
+    add(QStringLiteral("RecorderErrorText"), m_recorder->errorString());
+    add(QStringLiteral("RecorderOutput"),
+        QDir::toNativeSeparators(m_recorder->actualLocation().toLocalFile()));
+    add(QStringLiteral("MirrorHorizontal"), m_mirrorCheck->isChecked()
+                                                ? QStringLiteral("true") : QStringLiteral("false"));
+    add(QStringLiteral("FlipVertical"), m_verticalCheck->isChecked()
+                                            ? QStringLiteral("true") : QStringLiteral("false"));
+    add(QStringLiteral("Rotation"), QString::number(m_rotationCombo->currentData().toInt()));
+
+    const auto devices = QMediaDevices::videoInputs();
+    lines.append(QString());
+    lines.append(QStringLiteral("[VideoDevices]"));
+    add(QStringLiteral("Count"), QString::number(devices.size()));
+    for (int i = 0; i < devices.size(); ++i) {
+        const auto &device = devices.at(i);
+        const QString prefix = QStringLiteral("Device%1").arg(i + 1);
+        add(prefix + QStringLiteral(".Name"), device.description());
+        add(prefix + QStringLiteral(".Id"), QString::fromLatin1(device.id().toHex()));
+        add(prefix + QStringLiteral(".Default"), device.isDefault()
+                                                     ? QStringLiteral("true") : QStringLiteral("false"));
+        add(prefix + QStringLiteral(".FormatCount"),
+            QString::number(device.videoFormats().size()));
+    }
+
+    QFile file(path);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        m_statusLabel->setText(tr("诊断信息导出失败：无法写入文件"));
+        return;
+    }
+    const QByteArray contents = (lines.join(QLatin1Char('\n')) + QLatin1Char('\n')).toUtf8();
+    if (file.write(contents) != contents.size()) {
+        m_statusLabel->setText(tr("诊断信息导出失败：文件写入不完整"));
+        return;
+    }
+    file.close();
+    m_statusLabel->setText(tr("诊断信息已保存：%1").arg(QDir::toNativeSeparators(path)));
+}
+
+void MainWindow::syncControls()
+{
+    const QSignalBlocker exposureBlocker(m_exposureSlider);
+    const QSignalBlocker zoomBlocker(m_zoomSlider);
+    const bool available = static_cast<bool>(m_camera);
+    m_exposureSlider->setEnabled(false);
+    m_zoomSlider->setEnabled(false);
+    m_exposureValue->setText("--");
+    m_zoomValue->setText("--");
+    m_exposureSlider->parentWidget()->setVisible(false);
+    m_zoomSlider->parentWidget()->setVisible(false);
+    if (!available)
+        return;
+
+    if (m_camera->supportedFeatures().testFlag(QCamera::Feature::ExposureCompensation)) {
+        // Qt exposes whether EV compensation is supported, but not its native
+        // range. Keep the UI within the range commonly accepted by backends.
+        m_exposureSlider->setRange(-4 * SliderScale, 4 * SliderScale);
+        m_exposureSlider->setValue(qRound(m_camera->exposureCompensation() * SliderScale));
+        m_exposureSlider->setEnabled(true);
+        m_exposureSlider->parentWidget()->setVisible(true);
+        m_exposureValue->setText(QString::number(m_camera->exposureCompensation(), 'f', 1));
+    }
+
+    const float minZoom = m_camera->minimumZoomFactor();
+    const float maxZoom = m_camera->maximumZoomFactor();
+    if (maxZoom > minZoom) {
+        const auto controls = m_nativeControls ? m_nativeControls->controls()
+                                               : QList<NativeCameraControls::Control>{};
+        const bool nativeZoom = std::any_of(controls.begin(), controls.end(), [](const auto &control) {
+            return control.id == NativeCameraControls::Id::Zoom;
+        });
+        m_zoomSlider->parentWidget()->setVisible(!nativeZoom);
+        m_zoomSlider->setRange(qRound(minZoom * SliderScale), qRound(maxZoom * SliderScale));
+        m_zoomSlider->setValue(qRound(m_camera->zoomFactor() * SliderScale));
+        m_zoomSlider->setEnabled(true);
+        m_zoomValue->setText(QString::number(m_camera->zoomFactor(), 'f', 1) + QStringLiteral("×"));
+    }
+}

@@ -1,0 +1,93 @@
+name: Windows Build
+
+env:
+  APP_VERSION: "0.9.4"
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - "agent/**"
+  pull_request:
+
+jobs:
+  build-windows:
+    runs-on: windows-2022
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: "6.8.3"
+          arch: win64_msvc2022_64
+          modules: qtmultimedia
+          cache: true
+
+      - name: Configure
+        run: cmake -S . -B build -A x64 -DCMAKE_BUILD_TYPE=Release -DAPP_BUILD_ID=${{ github.sha }}
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: Deploy Qt runtime
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path package | Out-Null
+          $exeName = "UsbCameraControl-v$env:APP_VERSION.exe"
+          Copy-Item "build/Release/$exeName" package/
+          windeployqt --release --no-translations --compiler-runtime "package/$exeName"
+
+          $requiredRuntime = @("VCRUNTIME140.dll", "VCRUNTIME140_1.dll", "MSVCP140.dll")
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vsInstall = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Redist.14.Latest -property installationPath
+          $crtDir = Get-ChildItem "$vsInstall\VC\Redist\MSVC\*\x64\Microsoft.VC143.CRT" -Directory |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1
+          if (-not $crtDir) {
+            throw "Microsoft VC++ x64 runtime directory was not found on the build runner"
+          }
+          foreach ($runtime in $requiredRuntime) {
+            Copy-Item "$($crtDir.FullName)\$runtime" package/ -Force
+          }
+
+          foreach ($runtime in $requiredRuntime) {
+            if (-not (Test-Path "package/$runtime")) {
+              throw "Windows package is incomplete: $runtime was not deployed"
+            }
+          }
+
+      - name: Download Microsoft VC++ runtime for installer
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri "https://aka.ms/vs/17/release/vc_redist.x64.exe" -OutFile "package/VC_redist.x64.exe"
+
+      - name: Upload Windows test build
+        uses: actions/upload-artifact@v4
+        with:
+          name: USB-Camera-Control-Portable-v${{ env.APP_VERSION }}-Windows10-x64-build-${{ github.run_number }}
+          path: package/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+
+      - name: Build Windows installer
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path installer-output | Out-Null
+          Invoke-WebRequest -Uri "https://raw.githubusercontent.com/jrsoftware/issrc/main/Files/Languages/ChineseSimplified.isl" -OutFile "installer/windows/ChineseSimplified.isl"
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DMyAppVersion=$env:APP_VERSION" installer/windows/USB-Camera-Control.iss
+
+      - name: Upload Windows installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: USB-Camera-Control-Setup-v${{ env.APP_VERSION }}-Windows10-x64-build-${{ github.run_number }}
+          path: installer-output/*.exe
+          if-no-files-found: error
+          retention-days: 14
