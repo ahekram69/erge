@@ -1,0 +1,11 @@
+/build/
+/build-*/
+/.qt/
+/.vs/
+/.vscode/
+*.user
+*.user.*
+*.dmg
+*.exe
+*.zip
+.DS_Store

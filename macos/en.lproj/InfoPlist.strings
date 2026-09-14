@@ -1,0 +1,2 @@
+"CFBundleDisplayName" = "USB Camera Control";
+"NSCameraUsageDescription" = "USB Camera Control needs camera access to display live video, take snapshots, and record video.";

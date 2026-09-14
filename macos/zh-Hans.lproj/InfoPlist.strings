@@ -1,0 +1,2 @@
+"CFBundleDisplayName" = "USB Camera Control";
+"NSCameraUsageDescription" = "USB Camera Control 需要访问摄像头，以显示实时画面、截图和录像。";
