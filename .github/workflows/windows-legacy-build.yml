@@ -46,10 +46,13 @@ jobs:
           $env:PATH = (($env:PATH -split ';') | Where-Object { $_ -notlike "$env:QT_ROOT_DIR*" }) -join ';'
           $env:QT_PLUGIN_PATH = "$PWD"
           $env:QML2_IMPORT_PATH = ''
-          $env:QT_QPA_PLATFORM = 'offscreen'
-          $p = Start-Process .\USB-Camera-Control-Legacy-x86-v0.9.5.exe -ArgumentList '--self-test' -PassThru
-          if (!$p.WaitForExit(90000)) { $p.Kill(); throw 'Encoder test timed out' }
-          if ($p.ExitCode -ne 0) { throw "Encoder self-test failed: $($p.ExitCode)" }
+          # Exercise the shipped Windows platform plugin, not an SDK-only offscreen plugin.
+          $env:QT_QPA_PLATFORM = 'windows'
+          $env:QT_LOGGING_TO_CONSOLE = '1'
+          $stderr = "$env:RUNNER_TEMP/legacy-test-stderr.txt"
+          $p = Start-Process .\USB-Camera-Control-Legacy-x86-v0.9.5.exe -ArgumentList '--self-test' -PassThru -RedirectStandardError $stderr
+          if (!$p.WaitForExit(90000)) { $p.Kill(); Get-Content $stderr; throw 'Encoder test timed out' }
+          if ($p.ExitCode -ne 0) { Get-Content $stderr; throw "Encoder self-test failed: $($p.ExitCode)" }
           ffmpeg -v error -i legacy-encoder-test.mp4 -f null -
           if ($LASTEXITCODE) { throw 'MP4 decoding failed' }
           $probe = ffprobe -v error -show_entries stream=codec_name,width,height,nb_frames -of json legacy-encoder-test.mp4 | ConvertFrom-Json
