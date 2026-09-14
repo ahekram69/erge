@@ -15,7 +15,7 @@ Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
 [Files]
-Source: "..\legacy-package\*"; DestDir: "{app}"; Excludes: "VC_redist.x86.exe"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\legacy-package\*"; DestDir: "{app}"; Excludes: "VC_redist.x86.exe,legacy-encoder-test.mp4,decoded.rgb"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "..\legacy-package\VC_redist.x86.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall
 [Icons]
 Name: "{group}\USB Camera Control Legacy"; Filename: "{app}\{#AppExe}"

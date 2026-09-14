@@ -42,6 +42,10 @@ jobs:
           choco install ffmpeg -y --no-progress
           if ($LASTEXITCODE) { throw 'Decoder test dependency installation failed' }
           Push-Location legacy-package
+          # Do not accidentally satisfy dependencies from the runner's Qt installation.
+          $env:PATH = (($env:PATH -split ';') | Where-Object { $_ -notlike "$env:QT_ROOT_DIR*" }) -join ';'
+          $env:QT_PLUGIN_PATH = "$PWD"
+          $env:QML2_IMPORT_PATH = ''
           $env:QT_QPA_PLATFORM = 'offscreen'
           $p = Start-Process .\USB-Camera-Control-Legacy-x86-v0.9.5.exe -ArgumentList '--self-test' -PassThru
           if (!$p.WaitForExit(90000)) { $p.Kill(); throw 'Encoder test timed out' }
