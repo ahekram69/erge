@@ -28,7 +28,7 @@
     <key>NSCameraUsageDescription</key>
     <string>USB Camera Control needs camera access to display live video, take snapshots, and record video.</string>
     <key>LSMinimumSystemVersion</key>
-    <string>12.0</string>
+    <string>${CMAKE_OSX_DEPLOYMENT_TARGET}</string>
     <key>NSHighResolutionCapable</key>
     <true/>
 </dict>

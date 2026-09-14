@@ -1,7 +1,7 @@
 name: Windows Build
 
 env:
-  APP_VERSION: "0.9.4"
+  APP_VERSION: "0.9.5"
 
 on:
   workflow_dispatch:

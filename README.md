@@ -9,7 +9,7 @@ Windows 优先、macOS 次优先的 USB 摄像头预览与参数控制软件。
 ## 系统要求
 
 - Windows 10 版本 1809（64 位）或更高版本；推荐 Windows 10/11。
-- macOS 由当前 Qt 6 构建支持的系统版本。
+- v0.9.5 Mac 安装包构建目标：macOS 12 及以上，Intel x86_64 与 Apple Silicon arm64 通用包；旧系统实机验收尚未完成。
 - Windows 7 不受 Qt 6 支持，当前主版本无法在 Windows 7 上运行。若必须支持，需单独维护基于旧版 Qt 和旧摄像头接口的 Legacy 版本。
 
 Windows 用户优先下载名称包含 `Setup` 的安装包。安装包会自动部署 Microsoft Visual C++
@@ -39,6 +39,16 @@ cmake --build build
 ```
 
 ## macOS 测试版
+
+兼容性构建使用官方 Qt 6.8.3（不要使用要求较新系统的 Homebrew Qt）。
+明确设置 `CMAKE_OSX_DEPLOYMENT_TARGET=12.0` 和
+`CMAKE_OSX_ARCHITECTURES=arm64;x86_64`。本地 macOS 26 SDK 已移除 Qt 6.8
+链接所需的 AGL，可通过 `CMAKE_OSX_SYSROOT` 指定本机已有的 macOS 15 SDK。
+打包后必须运行 `bash macos/verify-compatibility.sh <应用路径>`，检查全部 Mach-O
+依赖的架构和最低系统要求；修改 Info.plist 本身不能降低依赖的系统要求。
+
+Windows 7 SP1 32 位完整兼容版需独立适配，包括 MP4 录像；当前未交付，
+不能将现有 x64 安装包作为 32 位版本分发。
 
 在仓库的 **Actions → macOS Build** 页面下载 DMG。当前测试版采用临时签名，
 首次打开时如果 macOS 阻止运行，请在“系统设置 → 隐私与安全性”中选择“仍要打开”。

@@ -1,6 +1,11 @@
 cmake_minimum_required(VERSION 3.21)
 
-project(UsbCameraControl VERSION 0.9.4 LANGUAGES CXX)
+if(CMAKE_HOST_APPLE)
+    set(CMAKE_OSX_DEPLOYMENT_TARGET "12.0" CACHE STRING "Minimum supported macOS")
+    set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64" CACHE STRING "Supported Mac architectures")
+endif()
+
+project(UsbCameraControl VERSION 0.9.5 LANGUAGES CXX)
 
 set(APP_BUILD_ID "local" CACHE STRING "Build identifier shown in the application")
 
@@ -9,7 +14,12 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 
-find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Widgets Multimedia MultimediaWidgets LinguistTools)
+if(APPLE)
+    # Newer Homebrew Qt builds may require a newer OS even when our plist says 12.0.
+    find_package(Qt6 6.8...<6.9 REQUIRED COMPONENTS Core Gui Widgets Multimedia MultimediaWidgets LinguistTools)
+else()
+    find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Widgets Multimedia MultimediaWidgets LinguistTools)
+endif()
 
 qt_add_executable(UsbCameraControl WIN32 MACOSX_BUNDLE
     src/main.cpp
