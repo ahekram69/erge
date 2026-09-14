@@ -47,7 +47,9 @@ cmake --build build
 打包后必须运行 `bash macos/verify-compatibility.sh <应用路径>`，检查全部 Mach-O
 依赖的架构和最低系统要求；修改 Info.plist 本身不能降低依赖的系统要求。
 
-Windows 7 SP1 32 位完整兼容版需独立适配，包括 MP4 录像；当前未交付，
+Windows 7 SP1 32 位提供独立的 Legacy x86 TEST 候选版，包含单独适配的 MP4
+录像路径。云端 x86 编译、打包与合成 MP4 编解码检查已通过，Windows 7 真机、
+真实摄像头和完整功能验收尚未完成。详情见 [兼容版说明](legacy/README.md)。
 不能将现有 x64 安装包作为 32 位版本分发。
 
 在仓库的 **Actions → macOS Build** 页面下载 DMG。当前测试版采用临时签名，
