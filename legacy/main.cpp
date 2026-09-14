@@ -227,7 +227,7 @@ public:
             connect(folder,&QPushButton::clicked,this,[this,where]{const QString file=mediaPath(where,"");if(!file.isEmpty())QDesktopServices::openUrl(QUrl::fromLocalFile(QFileInfo(file).absolutePath()));});
         }
         auto *diagnostics=new QPushButton(text("导出诊断信息","Export diagnostics"));cl->addWidget(diagnostics);cl->addStretch();tabs->addTab(capture,text("拍摄与画面","Capture / image"));
-        status=new QLabel;status->setWordWrap(true);panel->addWidget(status);
+        status=new QLabel(text("未连接摄像头，等待重新连接","No camera; waiting for reconnection"));status->setWordWrap(true);panel->addWidget(status);
         connect(diagnostics,&QPushButton::clicked,this,[this]{const QString path=QFileDialog::getSaveFileName(this,text("导出诊断信息","Export diagnostics"),"camera-diagnostics.txt");if(path.isEmpty())return;QSaveFile file(path);if(!file.open(QIODevice::WriteOnly))return;QTextStream out(&file);out<<"Legacy x86 "<<APP_VERSION<<"\n"<<QSysInfo::prettyProductName()<<"\n"<<deviceBox->currentText()<<"\n"<<frame.size().width()<<"x"<<frame.size().height()<<"\n"<<status->text()<<"\n";out.flush();status->setText(file.commit()?text("已导出","Exported"):text("导出失败","Export failed"));});
         connect(snapshot,&QPushButton::clicked,this,[this]{if(frame.isNull()){status->setText(text("没有可用画面","No frame available"));return;}const QString path=mediaPath(QStandardPaths::PicturesLocation,".png");if(!path.isEmpty())status->setText(transformed().save(path)?text("截图已保存：","Snapshot saved: ")+path:text("截图失败","Snapshot failed"));});
         connect(recordButton,&QPushButton::clicked,this,[this]{
@@ -242,7 +242,7 @@ public:
         connect(deviceBox,QOverload<int>::of(&QComboBox::activated),this,[this]{retries=0;openDevice();});
         connect(formatBox,QOverload<int>::of(&QComboBox::activated),this,[this]{if(!camera)return;camera->stop();const int i=formatBox->currentData().toInt();camera->setViewfinderSettings(i>=0&&i<formats.size()?formats[i]:QCameraViewfinderSettings());surface.take();frame={};frameClock.restart();if(requested)camera->start();});
         connect(hide,&QPushButton::clicked,this,[this,hide]{side->setVisible(side->isHidden());hide->setText(side->isHidden()?text("展开面板","Show controls"):text("收起面板","Hide controls"));});
-        auto toggle=[this,full]{if(isFullScreen()){showNormal();full->setText(text("全屏预览","Full screen"));}else{showFullScreen();full->setText(text("退出全屏","Exit full screen"));}};
+        auto toggle=[this,full,hide]{if(isFullScreen()){showNormal();side->setVisible(side->property("beforeFullScreen").toBool());hide->show();full->setText(text("全屏预览","Full screen"));}else{side->setProperty("beforeFullScreen",!side->isHidden());side->hide();hide->hide();showFullScreen();full->setText(text("退出全屏","Exit full screen"));}};
         connect(full,&QPushButton::clicked,this,toggle);connect(new QShortcut(QKeySequence(Qt::Key_Escape),this),&QShortcut::activated,this,[this,toggle]{if(isFullScreen())toggle();});
         connect(&frameTimer,&QTimer::timeout,this,[this]{
             QImage next=surface.take();
@@ -266,6 +266,7 @@ int main(int argc,char **argv) {
         const HRESULT hr=CoInitializeEx(nullptr,COINIT_APARTMENTTHREADED);
         int result=0;
         { Mp4Writer writer;QImage image(640,480,QImage::Format_RGB32);image.fill(Qt::red);
+          {QPainter painter(&image);painter.fillRect(0,240,640,240,Qt::blue);}
           if(!writer.start("legacy-encoder-test.mp4",image.size())) result=2;
           for(int i=0;i<60&&!result;++i)if(!writer.write(image,qint64(i)*10000000/30))result=3;
           if(!writer.finish())result=4;

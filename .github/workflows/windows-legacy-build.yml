@@ -46,7 +46,17 @@ jobs:
           if ($p.ExitCode -ne 0) { throw "Encoder self-test failed: $($p.ExitCode)" }
           ffmpeg -v error -i legacy-encoder-test.mp4 -f null -
           if ($LASTEXITCODE) { throw 'MP4 decoding failed' }
-          ffprobe -v error -show_entries stream=codec_name,width,height,nb_frames -of json legacy-encoder-test.mp4
+          $probe = ffprobe -v error -show_entries stream=codec_name,width,height,nb_frames -of json legacy-encoder-test.mp4 | ConvertFrom-Json
+          $video = $probe.streams[0]
+          if ($video.codec_name -ne 'h264' -or $video.width -ne 640 -or $video.height -ne 480 -or $video.nb_frames -ne 60) { throw 'Unexpected encoded stream' }
+          ffmpeg -v error -i legacy-encoder-test.mp4 -frames:v 1 -pix_fmt rgb24 -f rawvideo decoded.rgb
+          if ($LASTEXITCODE) { throw 'First-frame decoding failed' }
+          $pixels = [IO.File]::ReadAllBytes("$PWD/decoded.rgb")
+          if ($pixels.Length -ne 640*480*3) { throw 'Decoded frame size mismatch' }
+          $top = (120*640+320)*3
+          $bottom = (360*640+320)*3
+          if ($pixels[$top] -lt 180 -or $pixels[$top+2] -gt 70 -or $pixels[$bottom+2] -lt 180 -or $pixels[$bottom] -gt 70) { throw 'Recording color/orientation mismatch' }
+          Write-Output 'PASS: H264, 640x480, 60 frames, red top / blue bottom'
           Pop-Location
       - name: Build installer using Inno Setup compatible with Windows 7
         shell: pwsh
