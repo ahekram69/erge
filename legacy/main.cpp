@@ -9,6 +9,7 @@
 #include <QMutex>
 #include <QMutexLocker>
 #include <windows.h>
+#include <objbase.h>
 #include <memory>
 
 static bool english = false;
