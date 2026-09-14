@@ -39,6 +39,8 @@ jobs:
       - name: Encode and decode synthetic MP4 (not a Win7 camera test)
         shell: pwsh
         run: |
+          choco install ffmpeg -y --no-progress
+          if ($LASTEXITCODE) { throw 'Decoder test dependency installation failed' }
           Push-Location legacy-package
           $env:QT_QPA_PLATFORM = 'offscreen'
           $p = Start-Process .\USB-Camera-Control-Legacy-x86-v0.9.5.exe -ArgumentList '--self-test' -PassThru
