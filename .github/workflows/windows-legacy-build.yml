@@ -1,0 +1,63 @@
+name: Windows Legacy x86 Test Build
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, 'agent/**']
+    paths: ['legacy/**', '.github/workflows/windows-legacy-build.yml', 'src/NativeCameraControls_windows.cpp']
+  pull_request:
+    paths: ['legacy/**', '.github/workflows/windows-legacy-build.yml', 'src/NativeCameraControls_windows.cpp']
+jobs:
+  legacy-x86:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: '5.15.2'
+          arch: win32_msvc2019
+          cache: true
+      - name: Build x86 with the Windows 7 compatible VS2019 toolset
+        shell: pwsh
+        run: |
+          cmake -S legacy -B build-legacy -A Win32 -T v142
+          if ($LASTEXITCODE) { throw 'Configure failed' }
+          cmake --build build-legacy --config Release --parallel
+          if ($LASTEXITCODE) { throw 'Build failed' }
+      - name: Deploy x86 runtime
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory legacy-package | Out-Null
+          Copy-Item build-legacy/Release/*.exe legacy-package/
+          windeployqt --release --no-translations --no-compiler-runtime legacy-package/USB-Camera-Control-Legacy-x86-v0.9.5.exe
+          if ($LASTEXITCODE) { throw 'Qt deployment failed' }
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vs = & $vswhere -latest -products * -property installationPath
+          $crt = Get-ChildItem "$vs\VC\Redist\MSVC\14.29*\x86\Microsoft.VC142.CRT" -Directory | Select-Object -First 1
+          if (!$crt) { throw 'VS2019 x86 redistributable not found; refusing to use a newer runtime' }
+          Copy-Item "$($crt.FullName)\*.dll" legacy-package/
+          Invoke-WebRequest https://aka.ms/vs/16/release/vc_redist.x86.exe -OutFile legacy-package/VC_redist.x86.exe
+      - name: Encode and decode synthetic MP4 (not a Win7 camera test)
+        shell: pwsh
+        run: |
+          Push-Location legacy-package
+          $env:QT_QPA_PLATFORM = 'offscreen'
+          $p = Start-Process .\USB-Camera-Control-Legacy-x86-v0.9.5.exe -ArgumentList '--self-test' -PassThru
+          if (!$p.WaitForExit(90000)) { $p.Kill(); throw 'Encoder test timed out' }
+          if ($p.ExitCode -ne 0) { throw "Encoder self-test failed: $($p.ExitCode)" }
+          ffmpeg -v error -i legacy-encoder-test.mp4 -f null -
+          if ($LASTEXITCODE) { throw 'MP4 decoding failed' }
+          ffprobe -v error -show_entries stream=codec_name,width,height,nb_frames -of json legacy-encoder-test.mp4
+          Pop-Location
+      - name: Build installer using Inno Setup compatible with Windows 7
+        shell: pwsh
+        run: |
+          choco install innosetup --version=6.2.2 --allow-downgrade -y --no-progress
+          if ($LASTEXITCODE) { throw 'Inno Setup installation failed' }
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" legacy/installer.iss
+          if ($LASTEXITCODE) { throw 'Installer compilation failed' }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: USB-Camera-Control-Legacy-v0.9.5-Win7-x86-TEST-build-${{ github.run_number }}
+          path: legacy-output/*.exe
+          if-no-files-found: error
+          retention-days: 14
